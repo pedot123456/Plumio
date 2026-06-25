@@ -25,7 +25,7 @@ export default function ProductCard({
       className="bg-surface-container-lowest rounded-t-[16px] rounded-b-lg level-1-shadow flex flex-col overflow-hidden hover:level-2-shadow transition-all hover:-translate-y-1 cursor-pointer"
       onClick={handleClick}
     >
-      <div className="relative w-full aspect-square bg-surface-container">
+      <div className="relative w-full h-48 bg-surface-container">
         <img className="w-full h-full object-cover" src={image} alt={title} />
         {badge && (
           <div
