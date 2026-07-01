@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
@@ -59,6 +59,20 @@ export default function ProductDetailsScreen() {
   const [activeThumb, setActiveThumb]   = useState(0);
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [guestMessage, setGuestMessage] = useState('');
+  const [inCart, setInCart]             = useState(false);
+  const [cartLoading, setCartLoading]   = useState(false);
+  const [chatLoading, setChatLoading]   = useState(false);
+  const [sellerMenuOpen, setSellerMenuOpen] = useState(false);
+  const sellerMenuRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (sellerMenuRef.current && !sellerMenuRef.current.contains(e.target))
+        setSellerMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -69,48 +83,114 @@ export default function ProductDetailsScreen() {
     setIsLoading(true);
     setError(null);
     try {
-      const [{ data: listingData, error: listingErr }, { data: reviewsData }] = await Promise.all([
-        supabase
-          .from('listings')
-          .select(`
-            id, title, description, price, condition, accepts_trades, created_at, meetup_location,
-            seller:profiles!listings_seller_id_fkey (
-              id, full_name, avatar_url, rating, verified
-            ),
-            listing_images (
-              id, url, position
-            )
-          `)
-          .eq('id', id)
-          .single(),
-        supabase
-          .from('reviews')
-          .select(`
-            id, rating, comment, created_at,
-            reviewer:profiles!reviews_reviewer_id_fkey (
-              full_name, avatar_url
-            )
-          `)
-          .eq('listing_id', id)
-          .order('created_at', { ascending: false })
-          .limit(10),
-      ]);
+      const { data: listingData, error: listingErr } = await supabase
+        .from('listings')
+        .select('id, title, description, price, condition, accepts_trade, created_at, image_url, user_id, seller_id')
+        .eq('id', id)
+        .single();
 
       if (listingErr) throw listingErr;
       setListing(listingData);
-      setSeller(listingData?.seller ?? null);
+      setImages(listingData?.image_url ? [listingData.image_url] : []);
 
-      // Sort images by position; fall back to the listing's own image_url
-      const sortedImages = (listingData?.listing_images ?? [])
-        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-        .map(img => img.url);
-      setImages(sortedImages.length > 0 ? sortedImages : listingData?.image_url ? [listingData.image_url] : []);
+      // Fetch seller profile separately
+      const sellerId = listingData?.user_id ?? listingData?.seller_id;
+      if (sellerId) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sellerId)
+          .maybeSingle();
+        setSeller(profileData ?? null);
+      }
+
+      // Reviews — silently skip if table doesn't exist yet
+      const { data: reviewsData } = await supabase
+        .from('reviews')
+        .select('id, rating, comment, created_at')
+        .eq('listing_id', id)
+        .order('created_at', { ascending: false })
+        .limit(10);
       setReviews(reviewsData ?? []);
+
+      if (session) {
+        const { data: cartCheck } = await supabase
+          .from('cart_items')
+          .select('id')
+          .eq('user_id', session.user.id)
+          .eq('listing_id', listingData.id)
+          .maybeSingle();
+        setInCart(!!cartCheck);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function handleChatSeller(prefillMsg = null) {
+    if (!requireAuth('chat')) return;
+    setChatLoading(true);
+    try {
+      const sellerId = listing.user_id ?? listing.seller_id;
+
+      // Find existing conversation for this buyer + listing
+      let { data: conv, error: findErr } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('listing_id', listing.id)
+        .eq('buyer_id', session.user.id)
+        .maybeSingle();
+
+      if (findErr) throw findErr;
+
+      // Create conversation if none exists
+      if (!conv) {
+        const { data: newConv, error: createErr } = await supabase
+          .from('conversations')
+          .insert({
+            listing_id: listing.id,
+            buyer_id:   session.user.id,
+            seller_id:  sellerId,
+          })
+          .select().single();
+        if (createErr) throw createErr;
+        conv = newConv;
+      }
+
+      navigate(`/chat/${conv.id}`, {
+        state: {
+          listingTitle: listing.title,
+          listingImage: listing.image_url,
+          sellerName:   seller?.username ?? seller?.full_name ?? seller?.name ?? 'Seller',
+          listingId:    listing.id,
+          sellerId,
+          prefill:      prefillMsg,
+        },
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
+  async function handleAddToCart() {
+    if (!session) {
+      setGuestMessage('Log in to add items to your cart.');
+      setShowGuestModal(true);
+      return;
+    }
+    if (inCart) { navigate('/cart'); return; }
+    setCartLoading(true);
+    const { error } = await supabase.from('cart_items').insert({
+      user_id:    session.user.id,
+      listing_id: listing.id,
+      quantity:   1,
+    });
+    if (!error) setInCart(true);
+    setCartLoading(false);
   }
 
   function requireAuth(action) {
@@ -138,7 +218,7 @@ export default function ProductDetailsScreen() {
       : 0,
   }));
 
-  const acceptsTrades = listing?.accepts_trades ?? false;
+  const acceptsTrades = listing?.accepts_trade ?? false;
 
   const formatDate = iso => new Date(iso).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' });
   const timeAgo = iso => {
@@ -267,9 +347,17 @@ export default function ProductDetailsScreen() {
               <p className="font-display-lg text-display-lg text-primary-container font-black tracking-tight">
                 RM {Number(listing.price).toFixed(2)}
               </p>
-              <div className="flex items-center gap-xs text-on-surface-variant font-body-sm text-body-sm mt-xs">
-                <span className="material-symbols-outlined text-[18px]">schedule</span>
-                Listed {timeAgo(listing.created_at)}
+              <div className="flex items-center flex-wrap gap-sm mt-xs">
+                <div className="flex items-center gap-xs text-on-surface-variant font-body-sm text-body-sm">
+                  <span className="material-symbols-outlined text-[18px]">schedule</span>
+                  Listed {timeAgo(listing.created_at)}
+                </div>
+                {acceptsTrades && (
+                  <span className="inline-flex items-center gap-1 bg-secondary/10 text-secondary border border-secondary/30 px-sm py-[2px] rounded-full font-label-sm text-label-sm">
+                    <span className="material-symbols-outlined text-[14px]">swap_horiz</span>
+                    Accepts Trades
+                  </span>
+                )}
               </div>
             </div>
 
@@ -285,13 +373,15 @@ export default function ProductDetailsScreen() {
                     ) : (
                       <div className="w-full h-full bg-secondary-container flex items-center justify-center">
                         <span className="font-label-lg text-on-secondary-container font-bold">
-                          {seller?.full_name?.[0]?.toUpperCase() ?? '?'}
+                          {(seller?.username ?? seller?.full_name ?? seller?.name ?? '?')[0].toUpperCase()}
                         </span>
                       </div>
                     )}
                   </div>
                   <div>
-                    <span className="font-headline-sm text-headline-sm text-primary">{seller?.full_name ?? 'Seller'}</span>
+                    <span className="font-headline-sm text-headline-sm text-primary">
+                      {seller?.username ?? seller?.full_name ?? seller?.name ?? 'Seller'}
+                    </span>
                     {seller?.verified && (
                       <div className="flex items-center gap-1 text-secondary">
                         <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>verified</span>
@@ -300,9 +390,32 @@ export default function ProductDetailsScreen() {
                     )}
                   </div>
                 </div>
-                <button className="text-secondary hover:bg-secondary-container hover:text-on-secondary-container transition-colors p-2 rounded-full">
-                  <span className="material-symbols-outlined">more_vert</span>
-                </button>
+                <div className="relative" ref={sellerMenuRef}>
+                  <button
+                    className="text-secondary hover:bg-secondary-container hover:text-on-secondary-container transition-colors p-2 rounded-full"
+                    onClick={() => setSellerMenuOpen(v => !v)}
+                  >
+                    <span className="material-symbols-outlined">more_vert</span>
+                  </button>
+                  {sellerMenuOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-48 bg-surface rounded-xl shadow-level-2 border border-outline-variant/20 overflow-hidden z-50">
+                      <button
+                        className="w-full flex items-center gap-3 px-md py-sm font-body-md text-body-md text-error hover:bg-error/5 transition-colors text-left"
+                        onClick={() => { setSellerMenuOpen(false); navigate('/report'); }}
+                      >
+                        <span className="material-symbols-outlined text-[20px]">flag</span>
+                        Report Seller
+                      </button>
+                      <button
+                        className="w-full flex items-center gap-3 px-md py-sm font-body-md text-body-md text-on-surface hover:bg-surface-container transition-colors text-left"
+                        onClick={() => { setSellerMenuOpen(false); alert('Block feature coming soon.'); }}
+                      >
+                        <span className="material-symbols-outlined text-[20px] text-on-surface-variant">block</span>
+                        Block Seller
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               {listing.meetup_location && (
                 <div className="flex items-center gap-2 mt-xs text-on-surface-variant font-body-sm text-body-sm bg-surface-container-low p-2 rounded-lg w-fit">
@@ -326,17 +439,40 @@ export default function ProductDetailsScreen() {
 
               {/* Desktop CTA buttons */}
               <div className="hidden md:flex flex-col gap-sm mt-lg">
+                <button
+                  onClick={handleAddToCart}
+                  disabled={cartLoading}
+                  className={`w-full font-label-md text-label-md py-3 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 ${
+                    inCart
+                      ? 'bg-secondary/10 text-secondary border-2 border-secondary'
+                      : 'bg-primary-container text-on-primary hover:bg-primary'
+                  }`}
+                >
+                  {cartLoading ? (
+                    <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                  ) : (
+                    <span className="material-symbols-outlined text-[20px]">
+                      {inCart ? 'shopping_cart_checkout' : 'add_shopping_cart'}
+                    </span>
+                  )}
+                  {inCart ? 'Go to Cart' : 'Add to Cart'}
+                </button>
                 <div className="flex gap-md">
                   <button
-                    className="flex-1 bg-secondary text-on-secondary font-label-md text-label-md py-3 rounded-lg shadow-sm hover:shadow-md transition-all text-center"
-                    onClick={() => requireAuth('chat') && navigate('/chat/1')}
+                    className="flex-1 bg-secondary text-on-secondary font-label-md text-label-md py-3 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                    disabled={chatLoading}
+                    onClick={() => handleChatSeller()}
                   >
+                    {chatLoading
+                      ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      : <span className="material-symbols-outlined text-[18px]">chat</span>
+                    }
                     Chat Seller
                   </button>
                   <button
-                    className="flex-1 bg-primary-container text-on-primary font-label-md text-label-md py-3 rounded-lg shadow-sm hover:shadow-md transition-all text-center"
+                    className="flex-1 border border-outline-variant text-on-surface-variant font-label-md text-label-md py-3 rounded-lg shadow-sm hover:shadow-md transition-all text-center"
                     onClick={() => {
-                      if (requireAuth('offer')) navigate('/chat/1', { state: { prefill: 'Hi, I would like to make an offer for this item.' } });
+                      if (requireAuth('offer')) handleChatSeller('Hi, I would like to make an offer for this item.');
                     }}
                   >
                     Make Offer
@@ -347,7 +483,7 @@ export default function ProductDetailsScreen() {
                     <button
                       className="w-full border-2 border-secondary text-secondary font-label-md text-label-md py-3 rounded-lg hover:bg-secondary/8 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                       onClick={() => {
-                        if (requireAuth('trade')) navigate('/chat/1', { state: { prefill: 'Hi, I would like to propose a trade for this item.' } });
+                        if (requireAuth('trade')) handleChatSeller('Hi, I would like to propose a trade for this item.');
                       }}
                     >
                       <span className="material-symbols-outlined text-[20px]">swap_horiz</span>
@@ -418,7 +554,7 @@ export default function ProductDetailsScreen() {
                             )}
                           </div>
                           <div>
-                            <span className="font-label-md text-label-md text-on-surface font-semibold">{r.reviewer?.full_name ?? 'Anonymous'}</span>
+                            <span className="font-label-md text-label-md text-on-surface font-semibold">{r.reviewer?.username ?? 'Anonymous'}</span>
                             <div className="mt-[2px]"><Stars rating={r.rating} size={13} /></div>
                           </div>
                         </div>
@@ -437,18 +573,40 @@ export default function ProductDetailsScreen() {
       {/* ── Mobile CTA bar ── */}
       {!isLoading && !error && listing && (
         <div className="md:hidden fixed bottom-[72px] left-0 w-full px-margin-mobile py-sm bg-surface/95 backdrop-blur-md shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] border-t border-outline-variant z-40 flex flex-col gap-sm">
+          <button
+            onClick={handleAddToCart}
+            disabled={cartLoading}
+            className={`w-full font-label-md text-label-md py-3 rounded-lg shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 ${
+              inCart
+                ? 'bg-secondary/10 text-secondary border-2 border-secondary'
+                : 'bg-primary-container text-on-primary'
+            }`}
+          >
+            {cartLoading ? (
+              <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+            ) : (
+              <span className="material-symbols-outlined text-[20px]">
+                {inCart ? 'shopping_cart_checkout' : 'add_shopping_cart'}
+              </span>
+            )}
+            {inCart ? 'Go to Cart' : 'Add to Cart'}
+          </button>
           <div className="flex gap-sm">
             <button
-              className="flex-1 bg-secondary text-on-secondary font-label-md text-label-md py-3 rounded-lg shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-2"
-              onClick={() => requireAuth('chat') && navigate('/chat/1')}
+              className="flex-1 bg-secondary text-on-secondary font-label-md text-label-md py-3 rounded-lg shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+              disabled={chatLoading}
+              onClick={() => handleChatSeller()}
             >
-              <span className="material-symbols-outlined text-[20px]">chat</span>
+              {chatLoading
+                ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : <span className="material-symbols-outlined text-[20px]">chat</span>
+              }
               Chat Seller
             </button>
             <button
-              className="flex-1 bg-primary-container text-on-primary font-label-md text-label-md py-3 rounded-lg shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-2"
+              className="flex-1 border border-outline-variant text-on-surface-variant font-label-md text-label-md py-3 rounded-lg shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-2"
               onClick={() => {
-                if (requireAuth('offer')) navigate('/chat/1', { state: { prefill: 'Hi, I would like to make an offer for this item.' } });
+                if (requireAuth('offer')) handleChatSeller('Hi, I would like to make an offer for this item.');
               }}
             >
               <span className="material-symbols-outlined text-[20px]">local_offer</span>
@@ -460,7 +618,7 @@ export default function ProductDetailsScreen() {
               <button
                 className="w-full border-2 border-secondary text-secondary font-label-md text-label-md py-[10px] rounded-lg hover:bg-secondary/8 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                 onClick={() => {
-                  if (requireAuth('trade')) navigate('/chat/1', { state: { prefill: 'Hi, I would like to propose a trade for this item.' } });
+                  if (requireAuth('trade')) handleChatSeller('Hi, I would like to propose a trade for this item.');
                 }}
               >
                 <span className="material-symbols-outlined text-[20px]">swap_horiz</span>

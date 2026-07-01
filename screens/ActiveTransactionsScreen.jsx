@@ -4,18 +4,59 @@ import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import OrderReceivedModal from '../components/OrderReceivedModal';
 
-// UI display constants — not DB data
-const STATUS_STYLES = {
-  action:    { dot: 'bg-secondary',           label: 'text-secondary',              icon: 'text-secondary' },
-  waiting:   { dot: 'bg-outline',             label: 'text-on-surface-variant',     icon: 'text-on-surface-variant' },
-  delivered: { dot: 'bg-tertiary-fixed-dim',  label: 'text-on-tertiary-container',  icon: 'text-on-tertiary-container' },
+// Keyed by real DB status values
+const STATUS_CONFIG = {
+  escrow_locked: {
+    icon:     'lock',
+    label:    'Escrow Locked',
+    iconCls:  'text-secondary',
+    labelCls: 'text-secondary',
+    badgeCls: 'bg-secondary text-on-secondary',
+  },
+  completed: {
+    icon:     'check_circle',
+    label:    'Completed',
+    iconCls:  'text-green-600',
+    labelCls: 'text-green-600',
+    badgeCls: 'bg-green-100 text-green-700',
+  },
+  pending: {
+    icon:     'pending',
+    label:    'Pending',
+    iconCls:  'text-on-surface-variant',
+    labelCls: 'text-on-surface-variant',
+    badgeCls: 'bg-surface/90 text-on-surface-variant',
+  },
+  disputed: {
+    icon:     'report',
+    label:    'Under Dispute',
+    iconCls:  'text-error',
+    labelCls: 'text-error',
+    badgeCls: 'bg-error/10 text-error',
+  },
+  cancelled: {
+    icon:     'cancel',
+    label:    'Cancelled',
+    iconCls:  'text-on-surface-variant',
+    labelCls: 'text-on-surface-variant',
+    badgeCls: 'bg-surface/90 text-on-surface-variant',
+  },
 };
 
-const CTA_STYLES = {
-  action:    'bg-primary-container text-on-primary hover:bg-primary active:scale-[0.98]',
-  waiting:   'border border-outline-variant text-on-surface-variant hover:bg-surface-container active:scale-[0.98]',
-  delivered: 'bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary active:scale-[0.98]',
-};
+function getCtaConfig(status, isSeller) {
+  switch (status) {
+    case 'escrow_locked':
+      return isSeller
+        ? { label: 'Show QR',     icon: 'qr_code_2',    cls: 'bg-secondary text-on-secondary hover:bg-secondary/90' }
+        : { label: 'View Escrow', icon: 'lock',          cls: 'bg-primary-container text-on-primary hover:bg-primary' };
+    case 'completed':
+      return { label: 'Leave Review', icon: 'rate_review', cls: 'bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary' };
+    case 'disputed':
+      return { label: 'View Dispute', icon: 'report',       cls: 'bg-error/10 text-error hover:bg-error/20' };
+    default:
+      return { label: 'View',         icon: 'arrow_forward', cls: 'border border-outline-variant text-on-surface-variant hover:bg-surface-container' };
+  }
+}
 
 function TransactionSkeleton() {
   return (
@@ -58,11 +99,8 @@ export default function ActiveTransactionsScreen() {
           status,
           amount,
           meetup_location,
-          delivery_type,
-          detail,
-          detail_icon,
-          cta,
-          cta_icon,
+          buyer_id,
+          seller_id,
           listing:listings (
             id,
             title,
@@ -82,9 +120,19 @@ export default function ActiveTransactionsScreen() {
   }
 
   function handleCta(tx) {
-    if (tx.status === 'action') navigate('/handoff');
-    else if (tx.status === 'waiting') navigate('/chat/1');
-    else if (tx.status === 'delivered') setReviewModal(tx);
+    const isSeller = tab === 'Selling';
+    switch (tx.status) {
+      case 'escrow_locked':
+        return isSeller
+          ? navigate(`/handoff/${tx.id}`)
+          : navigate(`/escrow/${tx.id}`);
+      case 'completed':
+        return setReviewModal(tx);
+      case 'disputed':
+        return navigate('/report');
+      default:
+        return navigate(`/escrow/${tx.id}`);
+    }
   }
 
   async function handleFeedbackSubmit({ rating, review }) {
@@ -92,7 +140,7 @@ export default function ActiveTransactionsScreen() {
     try {
       await Promise.all([
         supabase.from('reviews').insert({
-          listing_id: reviewModal.listing?.id,
+          listing_id:  reviewModal.listing?.id,
           reviewer_id: session.user.id,
           rating,
           comment: review,
@@ -106,7 +154,7 @@ export default function ActiveTransactionsScreen() {
       // Non-blocking — modal closes regardless
     } finally {
       setReviewModal(null);
-      fetchTransactions();
+      navigate('/');
     }
   }
 
@@ -170,8 +218,9 @@ export default function ActiveTransactionsScreen() {
             </div>
           ) : (
             transactions.map(tx => {
-              const style = STATUS_STYLES[tx.status] ?? STATUS_STYLES.waiting;
-              const ctaStyle = CTA_STYLES[tx.status] ?? CTA_STYLES.waiting;
+              const isSeller = tab === 'Selling';
+              const cfg      = STATUS_CONFIG[tx.status] ?? STATUS_CONFIG.pending;
+              const cta      = getCtaConfig(tx.status, isSeller);
               return (
                 <div
                   key={tx.id}
@@ -179,18 +228,15 @@ export default function ActiveTransactionsScreen() {
                 >
                   {/* Image */}
                   <div className="w-full md:w-28 h-28 md:h-auto rounded-[12px] overflow-hidden shrink-0 bg-surface-container relative">
-                    {tx.listing?.image_url && (
-                      <img className="w-full h-full object-cover" src={tx.listing.image_url} alt={tx.listing.title} />
-                    )}
-                    <div className={`absolute top-2 left-2 flex items-center gap-1 px-2 py-1 rounded-full font-label-sm text-label-sm shadow-sm ${
-                      tx.status === 'action'
-                        ? 'bg-secondary text-on-secondary'
-                        : tx.status === 'delivered'
-                          ? 'bg-tertiary-fixed-dim text-on-surface'
-                          : 'bg-surface/90 text-on-surface-variant'
-                    }`}>
+                    {tx.listing?.image_url
+                      ? <img className="w-full h-full object-cover" src={tx.listing.image_url} alt={tx.listing.title} />
+                      : <div className="w-full h-full flex items-center justify-center">
+                          <span className="material-symbols-outlined text-[40px] text-outline-variant">image</span>
+                        </div>
+                    }
+                    <div className={`absolute top-2 left-2 flex items-center gap-1 px-2 py-1 rounded-full font-label-sm text-label-sm shadow-sm ${cfg.badgeCls}`}>
                       <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                        {tx.cta_icon ?? 'pending'}
+                        {cfg.icon}
                       </span>
                     </div>
                   </div>
@@ -208,39 +254,31 @@ export default function ActiveTransactionsScreen() {
 
                     <div className="flex flex-col gap-xs">
                       <div className="flex items-center gap-2">
-                        <span className={`material-symbols-outlined text-[16px] ${style.icon}`}>
-                          {tx.detail_icon ?? 'info'}
+                        <span className={`material-symbols-outlined text-[16px] ${cfg.iconCls}`}
+                          style={{ fontVariationSettings: "'FILL' 1" }}>
+                          {cfg.icon}
                         </span>
-                        <span className={`font-label-md text-label-md ${style.label}`}>
-                          {tx.detail ?? tx.status}
+                        <span className={`font-label-md text-label-md ${cfg.labelCls}`}>
+                          {cfg.label}
                         </span>
                       </div>
                       {tx.meetup_location && (
                         <div className="flex items-center gap-2">
-                          <span className="material-symbols-outlined text-on-surface-variant text-[16px] opacity-60">location_on</span>
-                          <span className="font-body-sm text-body-sm text-on-surface-variant opacity-60">
-                            Location: {tx.meetup_location}
+                          <span className="material-symbols-outlined text-on-surface-variant text-[16px]">location_on</span>
+                          <span className="font-body-sm text-body-sm text-on-surface-variant truncate">
+                            {tx.meetup_location}
                           </span>
                         </div>
                       )}
                     </div>
 
                     <div className="mt-1 flex justify-end gap-sm">
-                      {tx.status === 'delivered' && (
-                        <button
-                          className="font-label-md text-label-md py-2 px-md rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-container active:scale-[0.98] transition-all flex items-center gap-2"
-                          onClick={() => navigate('/report')}
-                        >
-                          <span className="material-symbols-outlined text-[18px]">flag</span>
-                          Report Issue
-                        </button>
-                      )}
                       <button
-                        className={`font-label-md text-label-md py-2 px-md rounded-lg flex items-center gap-2 transition-all ${ctaStyle}`}
+                        className={`font-label-md text-label-md py-2 px-md rounded-lg flex items-center gap-2 transition-all active:scale-[0.98] ${cta.cls}`}
                         onClick={() => handleCta(tx)}
                       >
-                        <span className="material-symbols-outlined text-[18px]">{tx.cta_icon ?? 'arrow_forward'}</span>
-                        {tx.cta ?? 'View'}
+                        <span className="material-symbols-outlined text-[18px]">{cta.icon}</span>
+                        {cta.label}
                       </button>
                     </div>
                   </div>

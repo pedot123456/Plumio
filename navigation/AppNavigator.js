@@ -8,6 +8,8 @@ import UserProfileScreen     from '../screens/UserProfileScreen';
 import ProductDetailsScreen  from '../screens/ProductDetailsScreen';
 import CreateListingScreen   from '../screens/CreateListingScreen';
 import SecureHandoffScreen   from '../screens/SecureHandoffScreen';
+import EscrowStatusScreen    from '../screens/EscrowStatusScreen';
+import HandoffConfirmScreen  from '../screens/HandoffConfirmScreen';
 import ChatNegotiationScreen from '../screens/ChatNegotiationScreen';
 import ActiveTransactionsScreen from '../screens/ActiveTransactionsScreen';
 import ProximitySearchScreen from '../screens/ProximitySearchScreen';
@@ -27,7 +29,10 @@ export default function AppNavigator() {
       <Route path="/profile"         element={<UserProfileScreen />} />
       <Route path="/product/:id"     element={<ProductDetailsScreen />} />
       <Route path="/create-listing"  element={<CreateListingScreen />} />
-      <Route path="/handoff"         element={<SecureHandoffScreen />} />
+      <Route path="/escrow/:txId"            element={<EscrowStatusScreen />} />
+      <Route path="/handoff/confirm/:txId"   element={<HandoffConfirmScreen />} />
+      <Route path="/handoff/:txId"           element={<SecureHandoffScreen />} />
+      <Route path="/handoff"                 element={<SecureHandoffScreen />} />
       <Route path="/chat/:id"        element={<ChatNegotiationScreen />} />
       <Route path="/transactions"    element={<ActiveTransactionsScreen />} />
       <Route path="/search"          element={<ProximitySearchScreen />} />
