@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+import { notify } from '../utils/notify';
 
 export default function ChatNegotiationScreen() {
   const navigate          = useNavigate();
@@ -98,6 +99,17 @@ export default function ChatNegotiationScreen() {
     }
   }, []);
 
+  // ── Get the other participant's ID (for notifications) ───────
+  async function getOtherUserId() {
+    const { data } = await supabase
+      .from('conversations')
+      .select('buyer_id, seller_id')
+      .eq('id', convId)
+      .maybeSingle();
+    if (!data) return null;
+    return data.buyer_id === session?.user?.id ? data.seller_id : data.buyer_id;
+  }
+
   // ── Fetch all messages ────────────────────────────────────────
   async function fetchMessages() {
     setIsLoading(true);
@@ -135,12 +147,20 @@ export default function ChatNegotiationScreen() {
 
     setSending(false);
     if (error) {
-      // Roll back optimistic message and show error
       setMessages(prev => prev.filter(m => m.id !== tempId));
       setChatError(error.message);
     } else if (data) {
-      // Confirm — swap temp with real (keeps position, removes clock icon)
       setMessages(prev => prev.map(m => m.id === tempId ? data : m));
+      // Notify other party
+      const otherId = await getOtherUserId();
+      if (otherId) {
+        notify(otherId, {
+          type:  'new_message',
+          title: `New message from ${session.user.user_metadata?.full_name ?? 'someone'}`,
+          body:  text.length > 80 ? text.slice(0, 80) + '…' : text,
+          data:  { chat_id: convId },
+        });
+      }
     }
   }
 
@@ -170,6 +190,16 @@ export default function ChatNegotiationScreen() {
       setMessages(prev => [...prev, data]);
       setShowOfferModal(false);
       setOfferAmount('');
+      // Notify other party of the new offer
+      const otherId = await getOtherUserId();
+      if (otherId) {
+        notify(otherId, {
+          type:  'new_offer',
+          title: 'New offer received',
+          body:  `RM ${amount.toFixed(2)} offer on "${listingTitle}"`,
+          data:  { chat_id: convId },
+        });
+      }
     }
   }
 

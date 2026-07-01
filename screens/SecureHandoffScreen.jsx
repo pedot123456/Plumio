@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+import { notify } from '../utils/notify';
 
 export default function SecureHandoffScreen() {
   const navigate    = useNavigate();
@@ -30,8 +31,19 @@ export default function SecureHandoffScreen() {
       `)
       .eq('id', txId)
       .single();
-    if (err) setError(err.message);
-    else setTx(data);
+    if (err) { setError(err.message); }
+    else {
+      setTx(data);
+      // Notify buyer that the QR code is ready for scanning
+      if (data?.buyer_id && data.buyer_id !== session?.user?.id) {
+        notify(data.buyer_id, {
+          type:  'qr_generated',
+          title: 'Meetup QR is ready',
+          body:  `The seller has opened the QR for "${data.listing?.title ?? 'your item'}". Head to the meetup to scan it.`,
+          data:  { tx_id: data.id },
+        });
+      }
+    }
     setIsLoading(false);
   }
 

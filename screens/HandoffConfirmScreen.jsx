@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+import { notify } from '../utils/notify';
 
 export default function HandoffConfirmScreen() {
   const navigate    = useNavigate();
@@ -48,8 +49,19 @@ export default function HandoffConfirmScreen() {
       .update({ status: 'completed' })
       .eq('id', txId);
     setConfirming(false);
-    if (err) setError(err.message);
-    else setConfirmed(true);
+    if (err) { setError(err.message); }
+    else {
+      setConfirmed(true);
+      // Notify seller that handoff is complete and funds are released
+      if (tx?.seller_id) {
+        notify(tx.seller_id, {
+          type:  'handoff_complete',
+          title: 'Handoff complete — funds released!',
+          body:  `The buyer confirmed receipt of "${tx.listing?.title ?? 'your item'}". RM ${Number(tx.amount ?? 0).toFixed(2)} is on its way to your balance.`,
+          data:  { tx_id: txId },
+        });
+      }
+    }
   }
 
   // ── Already confirmed ─────────────────────────────────────────

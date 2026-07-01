@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from './NotificationBell';
 
 export default function TopAppBar({ variant = 'default', title, trailing }) {
   const navigate = useNavigate();
@@ -68,6 +69,7 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
           {/* Right-side auth section */}
           {session ? (
             <div className="flex items-center gap-xs">
+              <NotificationBell isDark={isDark} />
               <button
                 onClick={() => navigate('/profile')}
                 className={`hidden md:flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}

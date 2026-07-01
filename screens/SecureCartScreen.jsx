@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+import { notify } from '../utils/notify';
 
 // ── Constants ──────────────────────────────────────────────────
 const SHIPPING_FEE = 5.00;
@@ -118,6 +119,15 @@ export default function SecureCartScreen() {
           .single();
         if (txErr) throw txErr;
         if (tx && !firstTxId) firstTxId = tx.id;
+        // Notify seller that payment is locked in escrow
+        if (sellerId) {
+          await notify(sellerId, {
+            type:  'payment_escrow',
+            title: 'Payment held in escrow',
+            body:  `A buyer locked RM ${total.toFixed(2)} for "${item.listing?.title ?? 'your item'}"`,
+            data:  { tx_id: tx.id, listing_id: item.listing.id },
+          });
+        }
       }
       await supabase.from('cart_items').delete().eq('user_id', session.user.id);
       navigate(`/escrow/${firstTxId}`, { state: { meetupLocation: location, total, fulfillmentMethod: fulfillment } });
