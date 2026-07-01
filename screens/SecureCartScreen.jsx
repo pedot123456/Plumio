@@ -120,7 +120,7 @@ export default function SecureCartScreen() {
         if (tx && !firstTxId) firstTxId = tx.id;
       }
       await supabase.from('cart_items').delete().eq('user_id', session.user.id);
-      navigate(`/escrow/${firstTxId}`, { state: { meetupLocation: location, total } });
+      navigate(`/escrow/${firstTxId}`, { state: { meetupLocation: location, total, fulfillmentMethod: fulfillment } });
     } catch (err) {
       setError(err.message);
     } finally {

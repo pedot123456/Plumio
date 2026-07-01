@@ -2,28 +2,48 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
-import BottomNav from '../components/BottomNav';
 
-const STATUS_LABEL = {
-  escrow_locked: { label: 'Funds Locked',   icon: 'lock',          cls: 'text-secondary bg-secondary/10 border-secondary/20' },
-  completed:     { label: 'Handoff Done',   icon: 'check_circle',  cls: 'text-green-600 bg-green-50 border-green-200' },
-  disputed:      { label: 'Under Dispute',  icon: 'report',        cls: 'text-error bg-error/10 border-error/20' },
-  cancelled:     { label: 'Cancelled',      icon: 'cancel',        cls: 'text-outline bg-surface-container border-outline-variant' },
-};
+const HANDOFF_STEPS = [
+  { icon: 'handshake',      text: 'Meet the seller at the agreed location'         },
+  { icon: 'inventory',      text: 'Inspect the item carefully before confirming'   },
+  { icon: 'qr_code_scanner', text: 'Ask seller to open Plumio → Show QR, then scan' },
+  { icon: 'payments',       text: 'Funds released to seller instantly after scan'  },
+];
+
+const DELIVERY_STEPS = [
+  { icon: 'inventory_2',    text: 'Seller packs and ships your item'               },
+  { icon: 'local_shipping', text: 'Courier delivers to your address'               },
+  { icon: 'search',         text: 'Inspect the item when it arrives'               },
+  { icon: 'check_circle',   text: 'Tap "Confirm Receipt" to release funds'         },
+];
+
+function Skeleton() {
+  return (
+    <div className="animate-pulse flex items-center gap-3 bg-white rounded-2xl p-4">
+      <div className="w-20 h-20 rounded-xl bg-gray-100 shrink-0" />
+      <div className="flex-1 space-y-2">
+        <div className="h-4 bg-gray-100 rounded w-3/4" />
+        <div className="h-5 bg-gray-100 rounded w-1/4" />
+      </div>
+    </div>
+  );
+}
 
 export default function EscrowStatusScreen() {
-  const navigate      = useNavigate();
-  const { txId }      = useParams();
-  const location      = useLocation();
-  const { session }   = useAuth();
+  const navigate    = useNavigate();
+  const { txId }    = useParams();
+  const location    = useLocation();
+  const { session } = useAuth();
 
-  // State passed from SecureCartScreen (instant display while loading)
-  const passedLocation = location.state?.meetupLocation ?? '';
-  const passedTotal    = location.state?.total ?? null;
+  const passedLocation  = location.state?.meetupLocation    ?? '';
+  const passedTotal     = location.state?.total             ?? null;
+  const passedMethod    = location.state?.fulfillmentMethod ?? 'handoff';
 
-  const [tx,        setTx]        = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error,     setError]     = useState('');
+  const [tx,          setTx]          = useState(null);
+  const [isLoading,   setIsLoading]   = useState(true);
+  const [error,       setError]       = useState('');
+  const [confirming,  setConfirming]  = useState(false);
+  const [confirmed,   setConfirmed]   = useState(false);
 
   useEffect(() => {
     if (!txId) return;
@@ -46,166 +66,292 @@ export default function EscrowStatusScreen() {
     setIsLoading(false);
   }
 
-  const status    = STATUS_LABEL[tx?.status] ?? STATUS_LABEL.escrow_locked;
-  const meetupLoc = tx?.meetup_location ?? passedLocation;
-  const amount    = tx?.amount ?? passedTotal;
-  const isSeller  = session?.user?.id === tx?.seller_id;
+  async function handleConfirmReceipt() {
+    if (!window.confirm('Confirm you have received the item? This will release funds to the seller and cannot be undone.')) return;
+    setConfirming(true);
+    const { error: err } = await supabase
+      .from('transactions')
+      .update({ status: 'completed' })
+      .eq('id', txId);
+    setConfirming(false);
+    if (err) setError(err.message);
+    else setConfirmed(true);
+  }
+
+  const meetupLoc       = tx?.meetup_location ?? passedLocation;
+  const amount          = tx?.amount          ?? passedTotal;
+  const isSeller        = session?.user?.id === tx?.seller_id;
+  const isCompleted     = tx?.status === 'completed' || confirmed;
+  const isDelivery      = passedMethod === 'delivery';
+
+  // ── Confirmed success overlay ────────────────────────────────
+  if (confirmed) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4" style={{ fontFamily: "'Inter', sans-serif" }}>
+        <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-xl flex flex-col items-center text-center gap-5">
+          <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
+            <span className="material-symbols-outlined text-green-500" style={{ fontSize: 44, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+          </div>
+          <div>
+            <h2 className="font-bold text-gray-900 text-xl mb-1">Receipt Confirmed!</h2>
+            <p className="text-gray-500 text-sm leading-relaxed">
+              Funds of <span className="font-semibold text-gray-800">RM {Number(amount ?? 0).toFixed(2)}</span> have been released to the seller. Thank you for using Plumio Escrow.
+            </p>
+          </div>
+          <div className="w-full flex flex-col gap-3">
+            <button onClick={() => navigate('/')} className="w-full bg-[#A855F7] hover:bg-[#9333EA] text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+              <span className="material-symbols-outlined text-[18px]">home</span>
+              Back to Home
+            </button>
+            <button onClick={() => navigate('/transactions')} className="w-full border border-gray-200 text-gray-600 font-medium py-3 rounded-xl hover:bg-gray-50 transition-colors">
+              View Transactions
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-background text-on-background min-h-screen flex flex-col font-body-md pb-[144px]">
+    <div className="bg-gray-50 min-h-screen pb-[120px]" style={{ fontFamily: "'Inter', sans-serif" }}>
+
       {/* Header */}
-      <header className="bg-surface shadow-sm fixed top-0 w-full z-40">
-        <div className="flex items-center px-lg py-md max-w-container-max mx-auto gap-md">
-          <button
-            className="text-primary hover:bg-surface-container-high transition-colors p-2 rounded-full shrink-0"
-            onClick={() => navigate('/transactions')}
-          >
-            <span className="material-symbols-outlined">arrow_back</span>
+      <header className="bg-white border-b border-gray-100 fixed top-0 w-full z-40">
+        <div className="flex items-center px-4 h-14 max-w-2xl mx-auto gap-3">
+          <button onClick={() => navigate('/transactions')} className="p-2 rounded-full hover:bg-gray-100 transition-colors text-gray-600">
+            <span className="material-symbols-outlined text-[22px]">arrow_back</span>
           </button>
-          <h1 className="font-headline-md text-headline-md font-bold text-primary flex-1">Escrow Status</h1>
+          <h1 className="font-bold text-gray-900 flex-1 text-center text-base pr-8">
+            {isDelivery ? 'Order Status' : 'Escrow Status'}
+          </h1>
         </div>
       </header>
 
-      <main className="flex-grow pt-[72px] px-margin-mobile md:px-lg max-w-container-max mx-auto w-full flex flex-col gap-lg py-lg">
+      <main className="pt-14 max-w-2xl mx-auto px-4 flex flex-col gap-4 py-5">
 
+        {/* Error */}
         {error && (
-          <div className="flex items-center gap-sm text-error font-body-sm bg-error/10 rounded-lg px-md py-sm">
+          <div className="flex items-center gap-2 text-red-700 text-sm bg-red-50 border border-red-200 rounded-xl px-4 py-3">
             <span className="material-symbols-outlined text-[18px] shrink-0">error_outline</span>
-            <span>{error}</span>
+            <span className="flex-1">{error}</span>
           </div>
         )}
 
-        {/* Locked banner */}
-        <div className={`flex items-center gap-sm border rounded-xl px-md py-sm ${status.cls}`}>
-          <span
-            className="material-symbols-outlined text-[22px] shrink-0"
-            style={{ fontVariationSettings: "'FILL' 1" }}
-          >
-            {status.icon}
-          </span>
+        {/* ── Status Banner ── */}
+        {isDelivery ? (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-green-600 text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                  {isCompleted ? 'check_circle' : 'local_shipping'}
+                </span>
+              </div>
+              <div>
+                <p className="font-bold text-gray-900 text-sm">
+                  {isCompleted ? 'Order Complete' : 'Order Confirmed · Awaiting Shipment'}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {isCompleted
+                    ? 'Funds have been released to the seller.'
+                    : 'Your payment is locked in escrow — seller is preparing your item.'}
+                </p>
+              </div>
+            </div>
+            {/* Progress bar */}
+            <div className="flex items-center gap-0 mt-4">
+              {['Paid', 'Packed', 'Shipped', 'Delivered', 'Done'].map((step, i) => (
+                <React.Fragment key={step}>
+                  <div className="flex flex-col items-center gap-1 flex-1">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold border-2 ${
+                      i === 0
+                        ? 'bg-[#A855F7] border-[#A855F7] text-white'
+                        : 'bg-white border-gray-200 text-gray-400'
+                    }`}>{i + 1}</div>
+                    <span className="text-[9px] text-gray-400 text-center leading-tight">{step}</span>
+                  </div>
+                  {i < 4 && <div className="h-0.5 flex-1 bg-gray-200 mb-4" />}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className={`bg-white rounded-2xl p-5 shadow-sm border flex items-center gap-3 ${
+            isCompleted ? 'border-green-200' : 'border-purple-100'
+          }`}>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+              isCompleted ? 'bg-green-100' : 'bg-purple-100'
+            }`}>
+              <span className={`material-symbols-outlined text-[22px] ${isCompleted ? 'text-green-600' : 'text-[#A855F7]'}`}
+                style={{ fontVariationSettings: "'FILL' 1" }}>
+                {isCompleted ? 'check_circle' : 'lock'}
+              </span>
+            </div>
+            <div>
+              <p className="font-bold text-gray-900 text-sm">
+                {isCompleted ? 'Handoff Complete' : 'Funds Locked · Escrow Active'}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {isCompleted
+                  ? 'Handoff confirmed. Funds released to seller.'
+                  : 'Payment held securely — released after you scan the QR.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Item Card ── */}
+        {isLoading ? <Skeleton /> : tx?.listing ? (
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-center gap-3">
+            <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-100 shrink-0">
+              {tx.listing.image_url
+                ? <img className="w-full h-full object-cover" src={tx.listing.image_url} alt={tx.listing.title} />
+                : <div className="w-full h-full flex items-center justify-center"><span className="material-symbols-outlined text-gray-300 text-[32px]">image</span></div>
+              }
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-snug">{tx.listing.title}</p>
+              <p className="text-base font-black text-[#A855F7] mt-1">
+                RM {Number(amount ?? tx.listing.price ?? 0).toFixed(2)}
+              </p>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Order ID: <span className="font-mono">{txId?.slice(0, 8).toUpperCase()}</span>
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── Location Card ── */}
+        {meetupLoc ? (
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-start gap-3">
+            <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center shrink-0 mt-0.5">
+              <span className="material-symbols-outlined text-[#A855F7] text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                {isDelivery ? 'home' : 'location_on'}
+              </span>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                {isDelivery ? 'Delivery Address' : 'Meetup Location'}
+              </p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">{meetupLoc}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── Steps ── */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-4">
+            {isDelivery ? 'What Happens Next' : 'Handoff Steps'}
+          </p>
+          <div className="flex flex-col gap-4">
+            {(isDelivery ? DELIVERY_STEPS : HANDOFF_STEPS).map((step, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-purple-50 border border-purple-100 flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-[#A855F7] text-[16px]">{step.icon}</span>
+                </div>
+                <div className="flex-1 pt-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-[#A855F7] bg-purple-50 rounded-full w-4 h-4 flex items-center justify-center">{i + 1}</span>
+                    <p className="text-sm text-gray-600 leading-snug">{step.text}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Escrow protection badge ── */}
+        <div className="bg-green-50 border border-green-100 rounded-2xl p-4 flex items-start gap-3">
+          <span className="material-symbols-outlined text-green-600 text-[22px] shrink-0 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>verified_user</span>
           <div>
-            <p className="font-label-md text-label-md font-semibold">{status.label}</p>
-            <p className="font-body-sm text-body-sm opacity-80">
-              {tx?.status === 'completed'
-                ? 'Handoff confirmed. Funds released to seller.'
-                : 'Your payment is held securely until you confirm the handoff.'}
+            <p className="text-sm font-semibold text-green-800">Plumio Escrow Protection</p>
+            <p className="text-xs text-green-700 mt-0.5 leading-relaxed">
+              {isDelivery
+                ? 'Your money is locked and safe. Funds only release to the seller after you confirm receipt.'
+                : 'Funds locked until you physically verify and scan the QR code. You are protected.'}
             </p>
           </div>
         </div>
 
-        {/* Item card */}
-        {isLoading ? (
-          <div className="animate-pulse bg-white rounded-xl p-md flex items-center gap-md shadow-level-1">
-            <div className="w-20 h-20 rounded-lg bg-surface-container-high shrink-0" />
-            <div className="flex-1 space-y-sm">
-              <div className="h-4 bg-surface-container-high rounded w-3/4" />
-              <div className="h-5 bg-surface-container-high rounded w-1/4" />
-            </div>
-          </div>
-        ) : tx?.listing ? (
-          <div className="bg-white rounded-xl p-md flex items-center gap-md shadow-level-1 border border-outline-variant/20">
-            <div className="w-20 h-20 rounded-lg overflow-hidden bg-surface-container-high shrink-0">
-              {tx.listing.image_url
-                ? <img className="w-full h-full object-cover" src={tx.listing.image_url} alt={tx.listing.title} />
-                : <span className="material-symbols-outlined text-[32px] text-outline-variant flex items-center justify-center h-full">image</span>
-              }
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-body-md text-body-md text-primary font-semibold line-clamp-2">{tx.listing.title}</p>
-              <p className="font-headline-sm text-headline-sm text-primary mt-xs">
-                RM {Number(amount ?? tx.listing.price ?? 0).toFixed(2)}
-              </p>
-              <p className="font-body-sm text-body-sm text-on-surface-variant mt-xs">
-                Escrow ID: <span className="font-mono text-[11px]">{txId?.slice(0, 8)}…</span>
-              </p>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Meetup location */}
-        {meetupLoc ? (
-          <div className="bg-white rounded-xl p-md shadow-level-1 border border-outline-variant/20 flex items-start gap-sm">
-            <span
-              className="material-symbols-outlined text-secondary text-[22px] shrink-0 mt-0.5"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              location_on
-            </span>
-            <div>
-              <p className="font-label-md text-label-md text-on-surface-variant">Meetup Location</p>
-              <p className="font-body-md text-body-md text-primary font-semibold mt-xs">{meetupLoc}</p>
-            </div>
-          </div>
-        ) : null}
-
-        {/* Escrow bridge explanation */}
-        <div className="bg-secondary/5 border border-secondary/20 rounded-xl p-md flex flex-col gap-sm">
-          <div className="flex items-center gap-sm">
-            <span
-              className="material-symbols-outlined text-secondary text-[20px]"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              shield
-            </span>
-            <p className="font-label-md text-label-md text-secondary">Hyperlocal Secure Escrow Bridge</p>
-          </div>
-          <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
-            Your funds are placed in a controlled transaction ledger within Plumio — not sent to the seller yet.
-            Once you physically inspect the item and scan the seller's QR code, funds are released automatically.
-          </p>
-        </div>
-
-        {/* QR Handoff steps */}
-        <div className="bg-white rounded-xl p-md shadow-level-1 border border-outline-variant/20 flex flex-col gap-md">
-          <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Handoff Steps</p>
-          {[
-            { icon: 'handshake',  step: '1', text: `Meet the seller at ${meetupLoc || 'the agreed location'}` },
-            { icon: 'inventory',  step: '2', text: 'Inspect the item carefully before confirming' },
-            { icon: 'qr_code_scanner', step: '3', text: "Ask seller to open Plumio → Show QR, then scan it" },
-            { icon: 'payments',   step: '4', text: 'Funds released to seller instantly after your scan' },
-          ].map(({ icon, step, text }) => (
-            <div key={step} className="flex items-start gap-md">
-              <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center shrink-0">
-                <span className="material-symbols-outlined text-secondary text-[16px]">{icon}</span>
-              </div>
-              <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed pt-1">{text}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* If current user is the seller, offer shortcut to QR screen */}
-        {isSeller && (
+        {/* Seller shortcut (handoff only) */}
+        {!isDelivery && isSeller && (
           <button
             onClick={() => navigate(`/handoff/${txId}`)}
-            className="w-full bg-secondary text-on-secondary font-label-md text-label-md py-sm rounded-xl flex items-center justify-center gap-sm hover:bg-secondary/90 transition-colors"
+            className="w-full bg-[#A855F7] hover:bg-[#9333EA] text-white font-bold py-3 rounded-2xl transition-colors flex items-center justify-center gap-2 shadow-md shadow-purple-200/60"
           >
             <span className="material-symbols-outlined text-[20px]">qr_code_2</span>
-            Show Handoff QR Code
+            Show My Handoff QR Code
           </button>
         )}
+
       </main>
 
-      {/* Pinned bottom actions */}
-      <div className="fixed bottom-[72px] left-0 w-full px-margin-mobile pb-md pt-sm bg-gradient-to-t from-surface via-surface to-transparent z-40 flex flex-col gap-sm max-w-container-max mx-auto">
-        {isSeller ? null : (
-          <button
-            onClick={() => navigate(`/handoff/${txId}`)}
-            className="w-full bg-secondary text-on-secondary font-label-md text-label-md py-sm rounded-xl flex items-center justify-center gap-sm hover:bg-secondary/90 transition-colors shadow-md"
-          >
-            <span className="material-symbols-outlined text-[20px]">qr_code_scanner</span>
-            Scan Handoff QR
-          </button>
-        )}
-        <button
-          onClick={() => navigate('/report')}
-          className="w-full border border-outline-variant text-on-surface-variant font-label-md text-label-md py-sm rounded-xl flex items-center justify-center gap-sm hover:bg-surface-container transition-colors"
-        >
-          <span className="material-symbols-outlined text-[20px]">report</span>
-          Report Issue / Dispute
-        </button>
-      </div>
+      {/* ── Sticky Bottom Actions ─────────────────────────────── */}
+      <div className="fixed bottom-0 left-0 w-full z-50 bg-gradient-to-t from-white via-white/95 to-transparent px-4 pb-6 pt-3">
+        <div className="max-w-2xl mx-auto flex flex-col gap-3">
 
-      <BottomNav activeTab="Home" />
+          {isDelivery ? (
+            /* ── Delivery CTAs ── */
+            <>
+              <button
+                onClick={handleConfirmReceipt}
+                disabled={confirming || isCompleted}
+                className="w-full bg-[#A855F7] hover:bg-[#9333EA] disabled:bg-purple-300 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-200/60 disabled:cursor-not-allowed text-base active:scale-[0.98]"
+              >
+                {confirming ? (
+                  <>
+                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Confirming…
+                  </>
+                ) : isCompleted ? (
+                  <>
+                    <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                    Receipt Confirmed
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                    I've Received My Item
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => navigate('/report')}
+                className="w-full border border-gray-200 text-gray-500 font-medium py-3 rounded-2xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                <span className="material-symbols-outlined text-[18px]">report</span>
+                Report Issue / Dispute
+              </button>
+            </>
+          ) : !isSeller ? (
+            /* ── Handoff buyer CTAs ── */
+            <>
+              <button
+                onClick={() => navigate(`/handoff/confirm/${txId}`)}
+                className="w-full bg-[#A855F7] hover:bg-[#9333EA] text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-200/60 text-base active:scale-[0.98]"
+              >
+                <span className="material-symbols-outlined text-[20px]">qr_code_scanner</span>
+                Scan Handoff QR
+              </button>
+              <button
+                onClick={() => navigate('/report')}
+                className="w-full border border-gray-200 text-gray-500 font-medium py-3 rounded-2xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                <span className="material-symbols-outlined text-[18px]">report</span>
+                Report Issue / Dispute
+              </button>
+            </>
+          ) : (
+            /* ── Handoff seller CTA ── */
+            <button
+              onClick={() => navigate('/report')}
+              className="w-full border border-gray-200 text-gray-500 font-medium py-3 rounded-2xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm"
+            >
+              <span className="material-symbols-outlined text-[18px]">report</span>
+              Report Issue / Dispute
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
