@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from './NotificationBell';
 
@@ -124,22 +124,41 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
     );
   }
 
-  // ── Default variant: back-button + title ──────────────────
+  // ── Default variant: back-button + title + logo ───────────
   return (
     <header className="bg-surface shadow-sm w-full sticky top-0 z-50">
       <div className="flex items-center justify-between w-full px-margin-mobile py-md max-w-container-max mx-auto h-16">
+
+        {/* Left — back arrow */}
         <button
           className="p-2 -ml-2 text-on-surface-variant hover:bg-surface-container-high transition-colors rounded-full flex items-center justify-center active:scale-95"
           onClick={() => navigate(-1)}
+          aria-label="Go back"
         >
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
+
+        {/* Centre — page title */}
         {title && (
           <h1 className="font-headline-md text-headline-md text-primary font-bold text-center flex-1 px-2 truncate">
             {title}
           </h1>
         )}
-        {trailing || <div className="w-10" />}
+
+        {/* Right — logo home link (or caller-supplied trailing element) */}
+        {trailing ?? (
+          <Link
+            to="/"
+            aria-label="Go to home"
+            className="flex items-center justify-center w-10 active:opacity-70 transition-opacity"
+          >
+            <img
+              src="/Plumio.png"
+              alt="Plumio"
+              className="h-8 w-auto object-contain"
+            />
+          </Link>
+        )}
       </div>
     </header>
   );

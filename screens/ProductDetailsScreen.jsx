@@ -3,7 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import BottomNav from '../components/BottomNav';
-import GuestModal from '../components/GuestModal';
+import GuestModal   from '../components/GuestModal';
+import LikeButton   from '../components/LikeButton';
 
 // ── UI helper: star row ────────────────────────────────────────
 function Stars({ rating, size = 16 }) {
@@ -78,6 +79,17 @@ export default function ProductDetailsScreen() {
     if (!id) return;
     fetchAll();
   }, [id]);
+
+  // Silently record this view — upsert so refreshing doesn't create duplicate rows.
+  // created_at is updated on conflict so the item rises to the top of "Recently Viewed".
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!id || !uid) return;
+    supabase.from('user_activity').upsert(
+      { user_id: uid, listing_id: id, activity_type: 'view', created_at: new Date().toISOString() },
+      { onConflict: 'user_id,listing_id,activity_type' }
+    );
+  }, [id, session?.user?.id]);
 
   async function fetchAll() {
     setIsLoading(true);
@@ -317,6 +329,14 @@ export default function ProductDetailsScreen() {
                   </span>
                 </div>
               )}
+
+              {/* Like button — top-right corner of hero image */}
+              <LikeButton
+                listingId={listing.id}
+                userId={session?.user?.id}
+                size={22}
+                className="absolute top-3 right-3 w-10 h-10 rounded-full bg-white/90 shadow-md"
+              />
             </div>
             {images.length > 1 && (
               <div className="flex gap-base px-margin-mobile md:px-0 overflow-x-auto no-scrollbar pb-xs">

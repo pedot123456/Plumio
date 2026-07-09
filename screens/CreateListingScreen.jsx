@@ -22,6 +22,13 @@ const DELIVERY_HINTS = {
   courier: 'You will need to pack and ship the item to the buyer.',
 };
 
+const MY_STATES = [
+  'Johor', 'Kedah', 'Kelantan', 'Melaka', 'Negeri Sembilan',
+  'Pahang', 'Perak', 'Perlis', 'Pulau Pinang', 'Sabah', 'Sarawak',
+  'Selangor', 'Terengganu',
+  'W.P. Kuala Lumpur', 'W.P. Labuan', 'W.P. Putrajaya',
+];
+
 export default function CreateListingScreen() {
   const navigate = useNavigate();
   const { session } = useAuth();
@@ -34,6 +41,7 @@ export default function CreateListingScreen() {
   const [category, setCategory]     = useState('');
   const [condition, setCondition]   = useState('');
   const [delivery, setDelivery]     = useState('local');
+  const [state,    setState]        = useState('');
   const [acceptTrades, setAcceptTrades] = useState(false);
 
   // Image state
@@ -144,6 +152,7 @@ export default function CreateListingScreen() {
         latitude:       latitude ?? null,
         longitude:      longitude ?? null,
         location_label: locationLabel || null,
+        state:          state || null,
         accepts_trade:  acceptTrades,
       });
       if (insertError) throw insertError;
@@ -291,6 +300,30 @@ export default function CreateListingScreen() {
                 expand_more
               </span>
             </div>
+          </div>
+
+          {/* State / Location */}
+          <div className="flex flex-col gap-xs">
+            <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="item-state">
+              State
+            </label>
+            <div className="relative">
+              <select
+                id="item-state"
+                value={state}
+                onChange={e => setState(e.target.value)}
+                className="w-full appearance-none bg-surface-container-lowest border border-tertiary/20 rounded-lg pl-md pr-xl py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent shadow-level-1 transition-all duration-200 cursor-pointer"
+              >
+                <option value="">Select your state</option>
+                {MY_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <span className="material-symbols-outlined absolute right-md top-1/2 -translate-y-1/2 text-primary-container/50 pointer-events-none">
+                expand_more
+              </span>
+            </div>
+            <p className="font-body-sm text-body-sm text-on-surface-variant/60">
+              Buyers nationwide can filter listings by state.
+            </p>
           </div>
 
           {/* Condition */}

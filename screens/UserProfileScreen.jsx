@@ -30,10 +30,10 @@ const PURCHASE_ACTIONS = [
 ];
 
 const ACTIVITY_ITEMS = [
-  { Icon: Heart,      label: 'My Likes',         path: '/'               },
-  { Icon: Eye,        label: 'Recently Viewed',  path: '/'               },
+  { Icon: Heart,      label: 'My Likes',         path: '/likes'          },
+  { Icon: Eye,        label: 'Recently Viewed',  path: '/viewed'         },
   { Icon: Store,      label: 'Start Selling',    path: '/create-listing' },
-  { Icon: RotateCcw,  label: 'Buy Again',        path: '/cart'           },
+  { Icon: RotateCcw,  label: 'Buy Again',        path: '/'               },
 ];
 
 const ACCOUNT_ITEMS = [
@@ -43,8 +43,8 @@ const ACCOUNT_ITEMS = [
 ];
 
 const SUPPORT_ITEMS = [
-  { Icon: HelpCircle,     label: 'Help Centre',       path: '/' },
-  { Icon: MessageCircle,  label: 'Chat with Plumio',  path: '/' },
+  { Icon: HelpCircle,     label: 'Help Centre',       path: '/help'         },
+  { Icon: MessageCircle,  label: 'Chat with Plumio',  path: '/support-chat' },
 ];
 
 function formatMemberSince(iso) {
@@ -70,7 +70,7 @@ function CardHeader({ title, action }) {
   );
 }
 
-function MenuRow({ Icon, label, sub, color = 'text-gray-500', bg = 'bg-gray-100', onClick, last }) {
+function MenuRow({ Icon, label, sub, color = 'text-gray-500', bg = 'bg-gray-100', onClick, last, count }) {
   return (
     <button
       onClick={onClick}
@@ -83,7 +83,13 @@ function MenuRow({ Icon, label, sub, color = 'text-gray-500', bg = 'bg-gray-100'
         <p className="text-sm font-medium text-gray-800">{label}</p>
         {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
       </div>
-      <ChevronRight size={16} className="text-gray-300 shrink-0" />
+      {count != null && count > 0 ? (
+        <span className="bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[20px] text-center shrink-0 leading-5">
+          {count > 99 ? '99+' : count}
+        </span>
+      ) : (
+        <ChevronRight size={16} className="text-gray-300 shrink-0" />
+      )}
     </button>
   );
 }
@@ -115,6 +121,8 @@ export default function UserProfileScreen() {
   const [tradesDone,  setTradesDone]  = useState(0);
   const [isLoading,   setIsLoading]   = useState(true);
   const [error,       setError]       = useState(null);
+  const [orderCounts, setOrderCounts] = useState({ to_pay: 0, to_ship: 0, to_receive: 0, completed: 0 });
+  const [likesCount,  setLikesCount]  = useState(0);
 
   // ── Edit modal state ───────────────────────────────────────────
   const [showEditModal,     setShowEditModal]     = useState(false);
@@ -140,10 +148,10 @@ export default function UserProfileScreen() {
     setError(null);
     const uid = session.user.id;
     try {
-      const [profileRes, activeRes, tradesRes] = await Promise.all([
+      const [profileRes, activeRes, tradesRes, toPayRes, toShipRes, toReceiveRes, toRateRes, likesRes] = await Promise.all([
         supabase
           .from('profiles')
-          .select('id, full_name, avatar_url, peer_rating, balance, is_verified, created_at')
+          .select('id, full_name, avatar_url, peer_rating, balance, is_verified, created_at, plumio_coins_balance, paylater_limit')
           .eq('id', uid)
           .maybeSingle(),
         supabase
@@ -156,11 +164,23 @@ export default function UserProfileScreen() {
           .select('id', { count: 'exact', head: true })
           .or(`buyer_id.eq.${uid},seller_id.eq.${uid}`)
           .eq('status', 'completed'),
+        supabase.from('orders').select('id', { count: 'exact', head: true }).eq('buyer_id', uid).eq('status', 'to_pay'),
+        supabase.from('orders').select('id', { count: 'exact', head: true }).eq('buyer_id', uid).eq('status', 'to_ship'),
+        supabase.from('orders').select('id', { count: 'exact', head: true }).eq('buyer_id', uid).eq('status', 'to_receive'),
+        supabase.from('orders').select('id', { count: 'exact', head: true }).eq('buyer_id', uid).eq('status', 'completed'),
+        supabase.from('user_activity').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('activity_type', 'like'),
       ]);
       if (profileRes.error) throw profileRes.error;
       setProfile(profileRes.data ?? {});
       setActiveItems(activeRes.count ?? 0);
       setTradesDone(tradesRes.count ?? 0);
+      setOrderCounts({
+        to_pay:     toPayRes.count     ?? 0,
+        to_ship:    toShipRes.count    ?? 0,
+        to_receive: toReceiveRes.count ?? 0,
+        completed:  toRateRes.count    ?? 0,
+      });
+      setLikesCount(likesRes.count ?? 0);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -252,7 +272,10 @@ export default function UserProfileScreen() {
   const initials     = (displayName[0] ?? '?').toUpperCase();
   const isVerified   = profile?.is_verified ?? false;
   const balance      = profile?.balance != null ? Number(profile.balance).toFixed(2) : '0.00';
-  const rating       = profile?.peer_rating != null ? Number(profile.peer_rating).toFixed(1) : '—';
+  const rating         = profile?.peer_rating != null ? Number(profile.peer_rating).toFixed(1) : '—';
+  const coins          = profile?.plumio_coins_balance != null ? Math.floor(Number(profile.plumio_coins_balance)) : 0;
+  const payLater       = profile?.paylater_limit != null ? Number(profile.paylater_limit).toFixed(2) : '0.00';
+  const purchaseCounts = [orderCounts.to_pay, orderCounts.to_ship, orderCounts.to_receive, orderCounts.completed];
 
   // ── Render ─────────────────────────────────────────────────────
   return (
@@ -366,14 +389,19 @@ export default function UserProfileScreen() {
                 }
               />
               <div className="grid grid-cols-4 gap-1 px-3 pb-4 pt-1">
-                {PURCHASE_ACTIONS.map(({ Icon, label, color, bg, path }) => (
+                {PURCHASE_ACTIONS.map(({ Icon, label, color, bg, path }, i) => (
                   <button
                     key={label}
                     onClick={() => navigate(path)}
                     className="flex flex-col items-center gap-2 py-3 rounded-xl hover:bg-gray-50 active:bg-gray-100 transition-colors"
                   >
-                    <div className={`w-11 h-11 rounded-full ${bg} flex items-center justify-center`}>
+                    <div className={`relative w-11 h-11 rounded-full ${bg} flex items-center justify-center`}>
                       <Icon size={20} className={color} />
+                      {purchaseCounts[i] > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none">
+                          {purchaseCounts[i] > 9 ? '9+' : purchaseCounts[i]}
+                        </span>
+                      )}
                     </div>
                     <span className="text-[11px] font-medium text-gray-600 text-center leading-tight">{label}</span>
                   </button>
@@ -392,25 +420,29 @@ export default function UserProfileScreen() {
                     value: `RM ${balance}`,
                     valueColor: 'text-[#A855F7] font-bold',
                     sub: 'Available to spend',
+                    path: '/wallet',
                   },
                   {
                     Icon: Coins,
                     label: 'My Plumio Coins',
-                    value: '0 Coins',
+                    value: `${coins} Coins`,
                     valueColor: 'text-amber-500 font-semibold',
                     sub: 'Earn coins with every purchase',
+                    path: '/coins',
                   },
                   {
                     Icon: Clock,
                     label: 'PlumioPayLater',
-                    value: 'RM 0.00',
+                    value: `RM ${payLater}`,
                     valueColor: 'text-green-600 font-semibold',
                     sub: 'Credit limit available',
                     last: true,
+                    path: '/paylater',
                   },
-                ].map(({ Icon, label, value, valueColor, sub, last }) => (
+                ].map(({ Icon, label, value, valueColor, sub, last, path: itemPath }) => (
                   <button
                     key={label}
+                    onClick={() => navigate(itemPath)}
                     className={`flex items-center gap-3 py-3.5 hover:bg-gray-50 active:bg-gray-100 transition-colors rounded-xl -mx-1 px-1 ${!last ? 'border-b border-gray-50' : ''}`}
                   >
                     <div className="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center shrink-0">
@@ -442,6 +474,7 @@ export default function UserProfileScreen() {
                     bg="bg-purple-50"
                     onClick={() => navigate(path)}
                     last={i === ACTIVITY_ITEMS.length - 1}
+                    count={label === 'My Likes' ? likesCount : undefined}
                   />
                 ))}
               </div>

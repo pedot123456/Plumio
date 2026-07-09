@@ -6,6 +6,8 @@ import TopAppBar from '../components/TopAppBar';
 import BottomNav from '../components/BottomNav';
 import ProductCard from '../components/ProductCard';
 
+const PAGE_SIZE = 8;
+
 // Static UI taxonomy — not DB-driven
 const CATEGORIES = [
   { icon: 'devices',   label: 'Electronics' },
@@ -31,30 +33,37 @@ export default function HomeScreen() {
   const navigate = useNavigate();
   const { session } = useAuth();
 
-  const [listings, setListings] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [listings,       setListings]       = useState([]);
+  const [isLoading,      setIsLoading]      = useState(true);
+  const [isLoadingMore,  setIsLoadingMore]  = useState(false);
+  const [hasMore,        setHasMore]        = useState(false);
+  const [offset,         setOffset]         = useState(0);
+  const [error,          setError]          = useState(null);
 
-  useEffect(() => {
-    async function fetchListings() {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const { data, error } = await supabase
-          .from('listings')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(8);
-        if (error) throw error;
-        setListings(data ?? []);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setIsLoading(false);
-      }
+  useEffect(() => { fetchPage(0, true); }, []);
+
+  async function fetchPage(start, replace) {
+    replace ? setIsLoading(true) : setIsLoadingMore(true);
+    setError(null);
+    try {
+      const { data, error: err } = await supabase
+        .from('listings')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(start, start + PAGE_SIZE - 1);
+      if (err) throw err;
+      const items = data ?? [];
+      replace
+        ? setListings(items)
+        : setListings(prev => [...prev, ...items]);
+      setOffset(start + PAGE_SIZE);
+      setHasMore(items.length === PAGE_SIZE);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      replace ? setIsLoading(false) : setIsLoadingMore(false);
     }
-    fetchListings();
-  }, []);
+  }
 
   const goIfAuth = path => {
     if (!session) navigate('/login');
@@ -134,7 +143,7 @@ export default function HomeScreen() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
             {isLoading
-              ? Array.from({ length: 8 }).map((_, i) => <ProductSkeleton key={i} />)
+              ? Array.from({ length: PAGE_SIZE }).map((_, i) => <ProductSkeleton key={i} />)
               : listings.length === 0
                 ? (
                   <div className="col-span-2 md:col-span-4 flex flex-col items-center justify-center py-xxl gap-md text-on-surface-variant">
@@ -156,6 +165,26 @@ export default function HomeScreen() {
                 ))
             }
           </div>
+
+          {/* View More */}
+          {!isLoading && hasMore && (
+            <div className="flex justify-center mt-lg">
+              <button
+                onClick={() => fetchPage(offset, false)}
+                disabled={isLoadingMore}
+                className="flex items-center gap-sm border border-outline text-on-surface-variant font-label-md text-label-md px-xl py-sm rounded-lg hover:bg-surface-container active:scale-[0.98] transition-all disabled:opacity-60"
+              >
+                {isLoadingMore ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-outline/40 border-t-secondary rounded-full animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  'View More'
+                )}
+              </button>
+            </div>
+          )}
         </section>
       </main>
 

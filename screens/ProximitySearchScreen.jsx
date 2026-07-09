@@ -16,6 +16,13 @@ const CATEGORY_MAP = {
 
 const RADIUS_MAP = { '< 1km': 1, '< 5km': 5, '< 10km': 10 };
 
+const MY_STATES = [
+  'Johor', 'Kedah', 'Kelantan', 'Melaka', 'Negeri Sembilan',
+  'Pahang', 'Perak', 'Perlis', 'Pulau Pinang', 'Sabah', 'Sarawak',
+  'Selangor', 'Terengganu',
+  'W.P. Kuala Lumpur', 'W.P. Labuan', 'W.P. Putrajaya',
+];
+
 function ProductSkeleton() {
   return (
     <div className="animate-pulse bg-surface-container-low rounded-[16px] overflow-hidden">
@@ -47,6 +54,7 @@ export default function ProximitySearchScreen() {
   const [userCoords,      setUserCoords]      = useState(null); // { lat, lng }
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError,   setLocationError]   = useState('');
+  const [stateFilter,     setStateFilter]     = useState('');
 
   useEffect(() => {
     fetchResults(searchText, nearMeActive, userCoords);
@@ -94,6 +102,9 @@ export default function ProximitySearchScreen() {
         if (CATEGORY_FILTERS.includes(activeFilter))
           q = q.eq('category', CATEGORY_MAP[activeFilter]);
 
+        if (stateFilter)
+          q = q.eq('state', stateFilter);
+
         ({ data, error: err } = await q);
       }
 
@@ -115,6 +126,8 @@ export default function ProximitySearchScreen() {
       fetchResults(searchText, false, null);
       return;
     }
+    // Turning on Near Me clears the state filter (different location modes)
+    setStateFilter('');
 
     if (!navigator.geolocation) {
       setLocationError('Your browser does not support location.');
@@ -223,6 +236,38 @@ export default function ProximitySearchScreen() {
             </button>
           ))}
         </div>
+
+        {/* State Filter Row */}
+        <div className="flex items-center gap-sm px-margin-mobile pb-sm">
+          <span className="material-symbols-outlined text-on-surface-variant text-[18px] shrink-0">map</span>
+          <div className="relative flex-1">
+            <select
+              value={stateFilter}
+              onChange={e => {
+                setStateFilter(e.target.value);
+                // selecting a state turns off GPS proximity mode
+                if (e.target.value) {
+                  setNearMeActive(false);
+                  setUserCoords(null);
+                }
+                fetchResults(searchText, false, null);
+              }}
+              className="w-full appearance-none bg-surface-container-lowest border border-outline-variant/40 rounded-full py-xs pl-md pr-8 font-label-md text-label-md text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/30 transition-all"
+            >
+              <option value="">All States</option>
+              {MY_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <span className="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-[16px] pointer-events-none">expand_more</span>
+          </div>
+          {stateFilter && (
+            <button
+              onClick={() => { setStateFilter(''); fetchResults(searchText); }}
+              className="shrink-0 font-label-sm text-label-sm text-secondary underline"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       <main className="max-w-container-max mx-auto px-margin-mobile pt-md">
@@ -232,6 +277,16 @@ export default function ProximitySearchScreen() {
           <div className="flex items-start gap-sm text-error font-body-sm text-body-sm bg-error/10 rounded-lg px-md py-sm mb-md">
             <span className="material-symbols-outlined text-[18px] shrink-0 mt-0.5">location_off</span>
             <span>{locationError}</span>
+          </div>
+        )}
+
+        {/* State filter active banner */}
+        {stateFilter && (
+          <div className="flex items-center gap-sm bg-secondary/10 border border-secondary/20 rounded-lg px-md py-sm mb-md">
+            <span className="material-symbols-outlined text-secondary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>map</span>
+            <span className="font-label-md text-label-md text-secondary">
+              Showing listings in {stateFilter}
+            </span>
           </div>
         )}
 
