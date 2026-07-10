@@ -24,6 +24,8 @@ import WalletScreen          from '../screens/WalletScreen';
 import LikesScreen           from '../screens/LikesScreen';
 import SettingsScreen        from '../screens/SettingsScreen';
 import RecentlyViewedScreen  from '../screens/RecentlyViewedScreen';
+import TermsPage             from '../screens/TermsPage';
+import PrivacyPage           from '../screens/PrivacyPage';
 import {
   CoinsScreen,
   PayLaterScreen,
@@ -69,6 +71,8 @@ export default function AppNavigator() {
         <Route path="/settings"        element={<SettingsScreen />} />
         <Route path="/help"            element={<HelpScreen />} />
         <Route path="/support-chat"    element={<SupportChatScreen />} />
+        <Route path="/terms"           element={<TermsPage />} />
+        <Route path="/privacy"         element={<PrivacyPage />} />
       </Route>
     </Routes>
   );

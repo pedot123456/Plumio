@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 
 export default function ProductCard({
   id,
@@ -26,7 +27,13 @@ export default function ProductCard({
       onClick={handleClick}
     >
       <div className="relative w-full h-48 bg-surface-container">
-        <img className="w-full h-full object-cover" src={image} alt={title} />
+        <motion.img
+          layoutId={`product-img-${id}`}
+          className="w-full h-full object-cover"
+          src={image}
+          alt={title}
+          transition={{ duration: 0.4, ease: 'easeInOut' }}
+        />
         {badge && (
           <div
             className={`absolute top-sm left-sm px-2 py-1 rounded font-label-sm text-[10px] font-bold ${

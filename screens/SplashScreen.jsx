@@ -16,12 +16,12 @@ export default function SplashScreen() {
         <img
           src="/Plumio.png"
           alt="Plumio"
-          className="h-28 w-28 object-contain drop-shadow-2xl"
+          className="h-40 w-40 object-contain drop-shadow-2xl"
         />
         <h1 className="text-white text-4xl font-extrabold tracking-tight">
           Plumio
         </h1>
-        <p className="text-purple-300 text-sm font-medium tracking-wide">
+        <p className="text-purple-300 text-base font-medium tracking-wide">
           Nak beli selamat, nak jual cepat?
         </p>
       </div>

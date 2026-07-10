@@ -1,5 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Screens that manage their own full-featured header.
 // The layout simply renders <Outlet /> for these so there's no double header.
@@ -40,6 +41,8 @@ const ROUTE_TITLES = {
   '/settings':     'Settings',
   '/help':         'Help Centre',
   '/support-chat': 'Chat with Plumio',
+  '/terms':        'Terms of Service',
+  '/privacy':      'Privacy Policy',
 };
 
 function getTitle(pathname) {
@@ -52,23 +55,27 @@ function getTitle(pathname) {
   return 'Plumio';
 }
 
+const pageVariants = {
+  initial: { opacity: 0, y: 16 },
+  animate: { opacity: 1, y: 0 },
+  exit:    { opacity: 0, y: -8 },
+};
+
 export default function MainLayout() {
   const { pathname } = useLocation();
   const navigate     = useNavigate();
-
-  // Pass-through for screens that own their header
-  if (isSelfHeaded(pathname)) return <Outlet />;
+  const selfHeaded   = isSelfHeaded(pathname);
 
   return (
     <div style={{ fontFamily: "'Inter', sans-serif" }}>
 
-      {/* ── Global top nav ── */}
-      <header className="bg-white border-b border-gray-100 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-lg mx-auto flex items-center h-14 px-4">
+      {/* ── Global top nav — hidden on self-headed screens ── */}
+      {!selfHeaded && (
+        <header className="bg-white border-b border-gray-100 sticky top-0 z-50 shadow-sm">
+          <div className="max-w-lg mx-auto flex items-center h-14 px-4">
 
-          {/* Left — back arrow (hidden on home) */}
-          <div className="w-10 flex items-center">
-            {pathname !== '/' && (
+            {/* Left — back arrow */}
+            <div className="w-10 flex items-center">
               <button
                 onClick={() => navigate(-1)}
                 aria-label="Go back"
@@ -78,30 +85,41 @@ export default function MainLayout() {
                   arrow_back
                 </span>
               </button>
-            )}
+            </div>
+
+            {/* Centre — section title */}
+            <h1 className="flex-1 text-center font-bold text-gray-900 text-sm tracking-tight truncate px-2">
+              {getTitle(pathname)}
+            </h1>
+
+            {/* Right — logo as home link */}
+            <div className="w-10 flex items-center justify-end">
+              <Link
+                to="/"
+                aria-label="Go to homepage"
+                className="flex items-center justify-center active:opacity-70 transition-opacity"
+              >
+                <img src="/Plumio.png" alt="Plumio" className="h-8 w-auto object-contain" />
+              </Link>
+            </div>
+
           </div>
+        </header>
+      )}
 
-          {/* Centre — section title */}
-          <h1 className="flex-1 text-center font-bold text-gray-900 text-sm tracking-tight truncate px-2">
-            {getTitle(pathname)}
-          </h1>
-
-          {/* Right — logo as home link */}
-          <div className="w-10 flex items-center justify-end">
-            <Link
-              to="/"
-              aria-label="Go to homepage"
-              className="flex items-center justify-center active:opacity-70 transition-opacity"
-            >
-              <img src="/Plumio.png" alt="Plumio" className="h-8 w-auto object-contain" />
-            </Link>
-          </div>
-
-        </div>
-      </header>
-
-      {/* ── Page content ── */}
-      <Outlet />
+      {/* ── Page content with fade+slide transition ── */}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={pathname}
+          variants={pageVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={{ duration: 0.4, ease: 'easeInOut' }}
+        >
+          <Outlet />
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

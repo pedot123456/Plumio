@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 
@@ -308,13 +308,13 @@ export default function LoginScreen() {
           {/* Footer */}
           <p className="text-center text-xs text-gray-400 mt-8 leading-relaxed">
             By signing in you agree to Plumio's{' '}
-            <span className="underline cursor-pointer hover:text-gray-600 transition-colors">
+            <Link to="/terms" className="underline hover:text-gray-600 transition-colors">
               Terms of Service
-            </span>{' '}
+            </Link>{' '}
             and{' '}
-            <span className="underline cursor-pointer hover:text-gray-600 transition-colors">
+            <Link to="/privacy" className="underline hover:text-gray-600 transition-colors">
               Privacy Policy
-            </span>.
+            </Link>.
           </p>
 
         </div>

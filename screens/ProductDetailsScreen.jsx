@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import BottomNav from '../components/BottomNav';
@@ -312,10 +313,16 @@ export default function ProductDetailsScreen() {
           <section className="md:col-span-7 lg:col-span-8 flex flex-col gap-base md:gap-md w-full">
             <div className="w-full aspect-square md:aspect-[4/3] bg-surface-container-low md:rounded-xl overflow-hidden shadow-sm relative group">
               {images[activeThumb] ? (
-                <img
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
+                <motion.img
+                  layoutId={activeThumb === 0 ? `product-img-${id}` : undefined}
+                  className="w-full h-full object-cover"
                   src={images[activeThumb]}
                   alt={listing.title}
+                  whileHover={{ scale: 1.05 }}
+                  transition={{
+                    layout: { duration: 0.4, ease: 'easeInOut' },
+                    scale:  { duration: 0.5 },
+                  }}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-surface-container-high">

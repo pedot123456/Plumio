@@ -4,10 +4,19 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import AppNavigator from './navigation/AppNavigator';
 import SplashScreen from './screens/SplashScreen';
 
-// Reads loading state from AuthContext — must live inside <AuthProvider>
+// Reads loading state from AuthContext — must live inside <AuthProvider>.
+// Enforces a 2-second minimum splash duration so fast auth sessions don't cause
+// a jarring flash before the app renders.
 function AppContent() {
   const { loading } = useAuth();
-  if (loading) return <SplashScreen />;
+  const [minTimeElapsed, setMinTimeElapsed] = React.useState(false);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => setMinTimeElapsed(true), 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading || !minTimeElapsed) return <SplashScreen />;
   return <AppNavigator />;
 }
 
