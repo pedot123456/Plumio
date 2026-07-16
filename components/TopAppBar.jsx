@@ -1,11 +1,37 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../supabase';
 import NotificationBell from './NotificationBell';
 
 export default function TopAppBar({ variant = 'default', title, trailing }) {
   const navigate = useNavigate();
   const { session } = useAuth();
+  const userId = session?.user?.id;
+
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
+  useEffect(() => {
+    if (!userId) { setUnreadMessages(0); return; }
+
+    async function fetchUnread() {
+      const { count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('receiver_id', userId)
+        .eq('is_read', false);
+      setUnreadMessages(count ?? 0);
+    }
+    fetchUnread();
+
+    const channel = supabase
+      .channel(`unread-dot-${userId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${userId}` }, fetchUnread)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `receiver_id=eq.${userId}` }, fetchUnread)
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [userId]);
 
   const handleSell = () => navigate(session ? '/create-listing' : '/login');
 
@@ -70,6 +96,22 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
           {session ? (
             <div className="flex items-center gap-xs">
               <NotificationBell isDark={isDark} />
+
+              {/* Messages button */}
+              <div className="relative">
+                <button
+                  onClick={() => navigate('/messages')}
+                  className={`flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
+                  aria-label="Messages"
+                >
+                  <span className="material-symbols-outlined text-[22px]">chat_bubble</span>
+                </button>
+                {/* Unread dot — only visible when there are unread messages */}
+                {unreadMessages > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white pointer-events-none" />
+                )}
+              </div>
+
               <button
                 onClick={() => navigate('/profile')}
                 className={`hidden md:flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}

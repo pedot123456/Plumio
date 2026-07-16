@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import TopAppBar from '../components/TopAppBar';
 import BottomNav from '../components/BottomNav';
 import ProductCard from '../components/ProductCard';
+import ChatWidget from '../components/ChatWidget';
 
 const PAGE_SIZE = 8;
 
@@ -74,7 +75,7 @@ export default function HomeScreen() {
     <div className="bg-background text-on-background pb-20 md:pb-0 font-body-md min-h-screen">
       <TopAppBar variant="home" />
 
-      <main className="max-w-container-max mx-auto px-margin-mobile md:px-lg pt-lg flex flex-col gap-lg">
+      <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-lg flex flex-col gap-lg">
         {/* Hero */}
         <section className="w-full rounded-xl overflow-hidden relative level-1-shadow bg-surface-container-lowest flex items-center min-h-[200px] md:min-h-[300px]">
           <div
@@ -112,7 +113,7 @@ export default function HomeScreen() {
               See All
             </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
             {CATEGORIES.map(cat => (
               <div
                 key={cat.label}
@@ -141,12 +142,12 @@ export default function HomeScreen() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
             {isLoading
               ? Array.from({ length: PAGE_SIZE }).map((_, i) => <ProductSkeleton key={i} />)
               : listings.length === 0
                 ? (
-                  <div className="col-span-2 md:col-span-4 flex flex-col items-center justify-center py-xxl gap-md text-on-surface-variant">
+                  <div className="col-span-2 sm:col-span-3 md:col-span-4 lg:col-span-5 flex flex-col items-center justify-center py-xxl gap-md text-on-surface-variant">
                     <span className="material-symbols-outlined text-[48px]">storefront</span>
                     <p className="font-body-md">No listings yet. Be the first to sell!</p>
                   </div>
@@ -189,6 +190,7 @@ export default function HomeScreen() {
       </main>
 
       <BottomNav activeTab="Home" />
+      <ChatWidget />
     </div>
   );
 }

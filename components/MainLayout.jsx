@@ -11,6 +11,7 @@ const SELF_HEADED = new Set([
   '/login',
   '/signup',
   '/forgot-password',
+  '/auth/callback',
   '/profile',
   '/cart',
   '/cart/secure',
@@ -19,6 +20,7 @@ const SELF_HEADED = new Set([
   '/transactions',
   '/report',
   '/search',
+  '/help',
 ]);
 
 function isSelfHeaded(pathname) {
@@ -27,7 +29,8 @@ function isSelfHeaded(pathname) {
     pathname.startsWith('/product/') ||
     pathname.startsWith('/chat/')    ||
     pathname.startsWith('/escrow/')  ||
-    pathname.startsWith('/handoff/')
+    pathname.startsWith('/handoff/') ||
+    pathname.startsWith('/help/')
   );
 }
 

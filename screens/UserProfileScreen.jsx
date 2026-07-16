@@ -43,8 +43,7 @@ const ACCOUNT_ITEMS = [
 ];
 
 const SUPPORT_ITEMS = [
-  { Icon: HelpCircle,     label: 'Help Centre',       path: '/help'         },
-  { Icon: MessageCircle,  label: 'Chat with Plumio',  path: '/support-chat' },
+  { Icon: HelpCircle, label: 'Help Centre', path: '/help' },
 ];
 
 function formatMemberSince(iso) {
@@ -284,7 +283,15 @@ export default function UserProfileScreen() {
       {/* ── Top bar ── */}
       <div className="bg-white border-b border-gray-100 sticky top-0 z-40">
         <div className="max-w-lg mx-auto flex items-center justify-between px-4 h-14">
-          <span className="font-bold text-gray-900 text-base">My Profile</span>
+          <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 hover:opacity-75 transition-opacity active:scale-95"
+            aria-label="Back to home"
+          >
+            <img src="/Plumio.png" alt="Plumio" className="h-8 w-auto object-contain" />
+            <span className="font-black text-gray-900 text-sm tracking-tight hidden sm:inline">Plumio</span>
+          </button>
+          <span className="font-bold text-gray-900 text-base absolute left-1/2 -translate-x-1/2">My Profile</span>
           <NotificationBell />
         </div>
       </div>
@@ -503,14 +510,18 @@ export default function UserProfileScreen() {
             <Card>
               <CardHeader title="Support" />
               <div className="pb-2">
-                {SUPPORT_ITEMS.map(({ Icon, label, path }, i) => (
+                {SUPPORT_ITEMS.map(({ Icon, label, path, chatbot }, i) => (
                   <MenuRow
                     key={label}
                     Icon={Icon}
                     label={label}
                     color="text-blue-500"
                     bg="bg-blue-50"
-                    onClick={() => navigate(path)}
+                    onClick={
+                      chatbot
+                        ? () => { if (typeof window !== 'undefined' && window.chatbase) window.chatbase('open'); }
+                        : () => navigate(path)
+                    }
                     last={i === SUPPORT_ITEMS.length - 1}
                   />
                 ))}

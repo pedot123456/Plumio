@@ -44,9 +44,9 @@ export default function CreateListingScreen() {
   const [state,    setState]        = useState('');
   const [acceptTrades, setAcceptTrades] = useState(false);
 
-  // Image state
-  const [imageFile, setImageFile]       = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
+  // Media state — each item: { file: File, preview: string (object URL) }
+  const [mediaItems, setMediaItems] = useState([]);
+  const [mediaError, setMediaError] = useState('');
 
   // Location state
   const [latitude, setLatitude]           = useState(null);
@@ -59,11 +59,30 @@ export default function CreateListingScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError]               = useState(null);
 
-  const handleImageSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+  const handleMediaSelect = (e) => {
+    const incoming = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!incoming.length) return;
+
+    setMediaItems(prev => {
+      const combined = [...prev, ...incoming.map(f => ({ file: f, preview: URL.createObjectURL(f) }))];
+      if (combined.length > 5) {
+        setMediaError('You can only upload a maximum of 5 files.');
+        // revoke the ones we can't keep
+        combined.slice(5).forEach(item => URL.revokeObjectURL(item.preview));
+        return combined.slice(0, 5);
+      }
+      setMediaError('');
+      return combined;
+    });
+  };
+
+  const handleRemoveMedia = (index) => {
+    setMediaItems(prev => {
+      URL.revokeObjectURL(prev[index].preview);
+      return prev.filter((_, i) => i !== index);
+    });
+    setMediaError('');
   };
 
   const handleGetLocation = () => {
@@ -106,39 +125,39 @@ export default function CreateListingScreen() {
     setLocationError('');
   };
 
-  const handleRemoveImage = () => {
-    setImageFile(null);
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
-    setImagePreview(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
   const handlePublish = async () => {
     setError(null);
 
-    if (!title.trim())              return setError('Item title is required.');
-    if (!category)                  return setError('Please select a category.');
+    if (!title.trim())                return setError('Item title is required.');
+    if (!category)                    return setError('Please select a category.');
     if (!price || Number(price) <= 0) return setError('Please enter a valid price.');
-    if (!session)                   return navigate('/login');
+    if (mediaItems.length < 3) {
+      return setError('Please upload at least 3 photos/videos to help buyers see your item clearly.');
+    }
+    if (mediaItems.length > 5) {
+      return setError('You can only upload a maximum of 5 files.');
+    }
+    if (!session) return navigate('/login');
 
     setIsSubmitting(true);
     try {
-      let image_url = null;
-
-      // Upload image to Supabase Storage
-      if (imageFile) {
-        const ext  = imageFile.name.split('.').pop();
-        const path = `${session.user.id}/${Date.now()}.${ext}`;
+      // Upload all media files and collect public URLs
+      const uploadedUrls = [];
+      for (let i = 0; i < mediaItems.length; i++) {
+        const { file } = mediaItems[i];
+        const ext  = file.name.split('.').pop() || 'bin';
+        const path = `${session.user.id}/${Date.now()}_${i}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('listing-images')
-          .upload(path, imageFile, { upsert: false });
+          .upload(path, file, { upsert: false });
         if (uploadError) throw uploadError;
-
         const { data: { publicUrl } } = supabase.storage
           .from('listing-images')
           .getPublicUrl(path);
-        image_url = publicUrl;
+        uploadedUrls.push(publicUrl);
       }
+
+      const image_url = uploadedUrls[0] ?? null; // first file = cover
 
       // Insert listing row
       const { error: insertError } = await supabase.from('listings').insert({
@@ -189,60 +208,128 @@ export default function CreateListingScreen() {
           </div>
         )}
 
-        {/* Photo Upload */}
+        {/* Photo / Video Upload */}
         <section className="px-margin-mobile mb-lg">
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/mp4,video/quicktime,video/webm"
+            multiple
             className="hidden"
-            onChange={handleImageSelect}
+            onChange={handleMediaSelect}
           />
 
-          {imagePreview ? (
-            <div className="relative w-full aspect-square md:aspect-[2/1] rounded-xl overflow-hidden group">
-              <img
-                src={imagePreview}
-                alt="Preview"
-                className="w-full h-full object-cover"
-              />
-              {/* Overlay controls */}
-              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-md">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="bg-surface text-primary-container px-md py-sm rounded-lg font-label-md text-label-md flex items-center gap-xs shadow"
-                >
-                  <span className="material-symbols-outlined text-[18px]">photo_camera</span>
-                  Change
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRemoveImage}
-                  className="bg-error text-on-error px-md py-sm rounded-lg font-label-md text-label-md flex items-center gap-xs shadow"
-                >
-                  <span className="material-symbols-outlined text-[18px]">delete</span>
-                  Remove
-                </button>
-              </div>
-            </div>
-          ) : (
+          {/* Empty state */}
+          {mediaItems.length === 0 && (
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-full aspect-square md:aspect-[2/1] rounded-xl border-2 border-dashed border-tertiary/20 bg-surface-container-lowest flex flex-col items-center justify-center hover:bg-surface-container-low transition-colors duration-200 group relative overflow-hidden"
+              className="w-full aspect-[2/1] rounded-xl border-2 border-dashed border-tertiary/20 bg-surface-container-lowest flex flex-col items-center justify-center hover:bg-surface-container-low transition-colors duration-200 group relative overflow-hidden"
             >
               <div className="absolute inset-0 bg-secondary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
               <div className="flex flex-col items-center justify-center space-y-sm z-10 p-md text-center">
                 <span className="material-symbols-outlined text-display-lg text-secondary group-hover:scale-110 transition-transform duration-300">
-                  photo_camera
+                  add_photo_alternate
                 </span>
-                <p className="font-label-md text-label-md text-secondary">Tap to upload a photo</p>
+                <p className="font-label-md text-label-md text-secondary">Tap to upload photos or videos</p>
                 <p className="font-body-sm text-body-sm text-tertiary/60 mt-xs">
-                  JPG, PNG or WEBP. First photo is the cover.
+                  Minimum 3, maximum 5 files · First file is the cover
                 </p>
               </div>
             </button>
+          )}
+
+          {/* Thumbnail row */}
+          {mediaItems.length > 0 && (
+            <div className="flex gap-2 flex-wrap">
+              {mediaItems.map((item, i) => (
+                <div key={i} className="relative w-24 h-24 rounded-xl overflow-hidden shrink-0 bg-surface-container-high">
+                  {item.file.type.startsWith('video/') ? (
+                    <video
+                      src={item.preview}
+                      muted
+                      playsInline
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <img
+                      src={item.preview}
+                      alt={`Media ${i + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+
+                  {/* Cover badge */}
+                  {i === 0 && (
+                    <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded-full leading-none">
+                      Cover
+                    </span>
+                  )}
+
+                  {/* Video badge */}
+                  {item.file.type.startsWith('video/') && (
+                    <span className="absolute top-1 left-1 bg-black/60 rounded-full p-0.5">
+                      <span className="material-symbols-outlined text-white text-[12px]">play_arrow</span>
+                    </span>
+                  )}
+
+                  {/* Remove button */}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveMedia(i)}
+                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white hover:bg-red-500 transition-colors"
+                    aria-label="Remove"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">close</span>
+                  </button>
+                </div>
+              ))}
+
+              {/* Add more slot */}
+              {mediaItems.length < 5 && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-24 h-24 rounded-xl border-2 border-dashed border-tertiary/20 bg-surface-container-lowest flex flex-col items-center justify-center gap-1 hover:bg-surface-container-low transition-colors shrink-0"
+                >
+                  <span className="material-symbols-outlined text-secondary text-[22px]">add_photo_alternate</span>
+                  <span className="text-[10px] text-secondary font-medium">Add more</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* File count hint */}
+          <div className="mt-2 flex items-center justify-between min-h-[18px]">
+            <p className={`text-xs font-medium transition-colors ${
+              mediaItems.length === 0
+                ? 'text-on-surface-variant/50'
+                : mediaItems.length < 3
+                  ? 'text-amber-600'
+                  : 'text-green-600'
+            }`}>
+              {mediaItems.length === 0
+                ? 'Upload 3–5 photos or videos'
+                : mediaItems.length < 3
+                  ? `${mediaItems.length} / 5 · Add ${3 - mediaItems.length} more to continue`
+                  : `${mediaItems.length} / 5 files selected`}
+            </p>
+            {mediaItems.length >= 3 && (
+              <span
+                className="material-symbols-outlined text-green-600 text-[16px]"
+                style={{ fontVariationSettings: "'FILL' 1" }}
+              >
+                check_circle
+              </span>
+            )}
+          </div>
+
+          {/* Inline error (max exceeded) */}
+          {mediaError && (
+            <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+              <span className="material-symbols-outlined text-[14px]">error_outline</span>
+              {mediaError}
+            </p>
           )}
         </section>
 

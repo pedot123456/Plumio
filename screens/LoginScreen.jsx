@@ -7,11 +7,17 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 }
 
-const STATS = [
-  { value: '500k+', label: 'Listings' },
-  { value: 'Trusted', label: 'Sellers' },
-  { value: 'Safe', label: 'Escrow' },
-];
+// Formats a raw Supabase count into a compact display string.
+// null  → '…'  (still loading)
+// 1250  → '1k+'
+// 52000 → '52k+'
+// 1.2M  → '1.2M+'
+function formatCount(n) {
+  if (n === null)     return '…';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M+`;
+  if (n >= 1_000)     return `${Math.floor(n / 1_000)}k+`;
+  return n.toLocaleString();
+}
 
 export default function LoginScreen() {
   const navigate     = useNavigate();
@@ -26,12 +32,24 @@ export default function LoginScreen() {
   const [oauthLoading, setOauthLoading] = useState('');
   const [errors, setErrors]             = useState({});
   const [serverError, setServerError]   = useState('');
+  const [listingCount, setListingCount] = useState(null);
 
   const signupSuccess = location.state?.signupSuccess;
 
+  // Redirect if already signed in
   useEffect(() => {
     if (session) navigate('/', { replace: true });
   }, [session, navigate]);
+
+  // Fetch total listing count from Supabase.
+  // { count: 'exact', head: true } sends a HEAD request — zero rows downloaded,
+  // only the Content-Range header is returned with the total row count.
+  useEffect(() => {
+    supabase
+      .from('listings')
+      .select('*', { count: 'exact', head: true })
+      .then(({ count }) => { if (count !== null) setListingCount(count); });
+  }, []);
 
   function validate() {
     const errs = {};
@@ -56,15 +74,31 @@ export default function LoginScreen() {
     if (error) setServerError(error.message);
   }
 
-  async function handleOAuth(provider) {
-    setOauthLoading(provider);
+  // ── OAuth handlers ─────────────────────────────────────────────
+  // redirectTo must be added to the "Redirect URLs" allow-list in
+  // Supabase Dashboard → Authentication → URL Configuration.
+  // Supabase exchanges the OAuth code automatically when the SPA loads
+  // at that URL — no extra server-side callback needed.
+
+  async function signInWithGoogle() {
+    setOauthLoading('google');
     setServerError('');
     const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: window.location.origin },
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
-    if (error) setServerError(error.message);
-    setOauthLoading('');
+    if (error) { setServerError(error.message); setOauthLoading(''); }
+    // On success the browser navigates away — no need to reset oauthLoading
+  }
+
+  async function signInWithFacebook() {
+    setOauthLoading('facebook');
+    setServerError('');
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'facebook',
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (error) { setServerError(error.message); setOauthLoading(''); }
   }
 
   function clearFieldError(field) {
@@ -100,18 +134,26 @@ export default function LoginScreen() {
           </h1>
 
           <p className="text-gray-300 text-base leading-relaxed mb-10">
-            Nak beli selamat, nak jual cepat?{' '}
-            <span className="text-purple-300 font-semibold">Plumio kan ada!</span>
+            Plumio –{' '}
+            <span className="text-purple-300 font-semibold">Purple Picks, Better Deals.</span>
           </p>
 
-          {/* Stats grid */}
+          {/* Stats grid — first cell is live from the database */}
           <div className="w-full grid grid-cols-3 gap-4 pt-8 border-t border-white/10">
-            {STATS.map((stat, i) => (
-              <div key={i} className="flex flex-col items-center gap-1">
-                <span className="text-white font-bold text-lg leading-tight">{stat.value}</span>
-                <span className="text-gray-400 text-xs leading-tight">{stat.label}</span>
-              </div>
-            ))}
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-white font-bold text-lg leading-tight tabular-nums">
+                {formatCount(listingCount)}
+              </span>
+              <span className="text-gray-400 text-xs leading-tight">Listings</span>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-white font-bold text-lg leading-tight">Trusted</span>
+              <span className="text-gray-400 text-xs leading-tight">Sellers</span>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-white font-bold text-lg leading-tight">Safe</span>
+              <span className="text-gray-400 text-xs leading-tight">Escrow</span>
+            </div>
           </div>
         </div>
       </div>
@@ -125,7 +167,7 @@ export default function LoginScreen() {
             <img src="/Plumio.png" alt="Plumio" className="h-28 mb-3 object-contain drop-shadow-md" />
             <span className="text-gray-800 font-black text-3xl tracking-tight">Plumio</span>
             <p className="text-gray-400 text-sm mt-1 text-center">
-              Nak beli selamat, nak jual cepat? Plumio kan ada!
+              Purple Picks, Better Deals.
             </p>
           </div>
 
@@ -258,7 +300,7 @@ export default function LoginScreen() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => handleOAuth('facebook')}
+                onClick={signInWithFacebook}
                 disabled={!!oauthLoading}
                 className="flex items-center justify-center gap-2 border border-gray-300 rounded-xl py-2.5 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors disabled:opacity-60"
               >
@@ -273,7 +315,7 @@ export default function LoginScreen() {
               </button>
               <button
                 type="button"
-                onClick={() => handleOAuth('google')}
+                onClick={signInWithGoogle}
                 disabled={!!oauthLoading}
                 className="flex items-center justify-center gap-2 border border-gray-300 rounded-xl py-2.5 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors disabled:opacity-60"
               >
