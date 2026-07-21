@@ -253,7 +253,17 @@ export default function HandoffConfirmScreen() {
               )}
             </button>
             <button
-              onClick={() => navigate('/report')}
+              onClick={() => navigate('/report', {
+                state: {
+                  listingId:         tx?.listing?.id,
+                  sellerId:          tx?.seller_id,
+                  listingTitle:      tx?.listing?.title,
+                  listingImage:      tx?.listing?.image_url,
+                  fulfillmentMethod: 'handoff',
+                  amount:            tx?.amount,
+                  txId:              txId,
+                },
+              })}
               className="w-full border border-outline-variant text-on-surface-variant font-label-md text-label-md py-sm rounded-xl flex items-center justify-center gap-sm hover:bg-surface-container transition-colors"
             >
               <span className="material-symbols-outlined text-[20px]">report</span>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import OrderReceivedModal from '../components/OrderReceivedModal';
@@ -43,12 +43,15 @@ const STATUS_CONFIG = {
   },
 };
 
-function getCtaConfig(status, isSeller) {
+function getCtaConfig(status, isSeller, fulfillmentMethod) {
   switch (status) {
     case 'escrow_locked':
-      return isSeller
-        ? { label: 'Show QR',     icon: 'qr_code_2',    cls: 'bg-secondary text-on-secondary hover:bg-secondary/90' }
-        : { label: 'View Escrow', icon: 'lock',          cls: 'bg-primary-container text-on-primary hover:bg-primary' };
+      if (isSeller) {
+        return fulfillmentMethod === 'delivery'
+          ? { label: 'Ship Now',    icon: 'local_shipping', cls: 'bg-amber-500 text-white hover:bg-amber-600' }
+          : { label: 'Show QR',     icon: 'qr_code_2',      cls: 'bg-secondary text-on-secondary hover:bg-secondary/90' };
+      }
+      return { label: 'Track Order', icon: 'lock', cls: 'bg-primary-container text-on-primary hover:bg-primary' };
     case 'completed':
       return { label: 'Leave Review', icon: 'rate_review', cls: 'bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary' };
     case 'disputed':
@@ -74,10 +77,13 @@ function TransactionSkeleton() {
 
 export default function ActiveTransactionsScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { session } = useAuth();
 
   const [tab, setTab] = useState('Buying');
   const [transactions, setTransactions] = useState([]);
+  const [showOrderBanner, setShowOrderBanner] = useState(location.state?.newOrder ?? false);
+  const newOrderCount = location.state?.orderCount ?? 0;
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [reviewModal, setReviewModal] = useState(null);
@@ -99,6 +105,7 @@ export default function ActiveTransactionsScreen() {
           status,
           amount,
           meetup_location,
+          fulfillment_method,
           buyer_id,
           seller_id,
           listing:listings (
@@ -123,9 +130,14 @@ export default function ActiveTransactionsScreen() {
     const isSeller = tab === 'Selling';
     switch (tx.status) {
       case 'escrow_locked':
-        return isSeller
-          ? navigate(`/handoff/${tx.id}`)
-          : navigate(`/escrow/${tx.id}`);
+        if (isSeller) {
+          // Delivery sellers: go to escrow screen to enter tracking number
+          // Handoff sellers: go to QR screen
+          return tx.fulfillment_method === 'delivery'
+            ? navigate(`/escrow/${tx.id}`)
+            : navigate(`/handoff/${tx.id}`);
+        }
+        return navigate(`/escrow/${tx.id}`);
       case 'completed':
         return setReviewModal(tx);
       case 'disputed':
@@ -174,6 +186,79 @@ export default function ActiveTransactionsScreen() {
       </header>
 
       <main className="max-w-container-max mx-auto px-margin-mobile md:px-gutter py-lg pb-xxl">
+
+        {/* Multi-item order success banner */}
+        {showOrderBanner && (
+          <div className="flex items-start gap-sm bg-green-50 border border-green-200 rounded-xl px-md py-sm mb-lg">
+            <span
+              className="material-symbols-outlined text-green-600 text-[20px] shrink-0 mt-0.5"
+              style={{ fontVariationSettings: "'FILL' 1" }}
+            >
+              check_circle
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="font-label-md text-label-md text-green-800">Payment successful!</p>
+              <p className="font-body-sm text-body-sm text-green-700">
+                {newOrderCount} item{newOrderCount !== 1 ? 's' : ''} are now locked in escrow. Track them below.
+              </p>
+            </div>
+            <button onClick={() => setShowOrderBanner(false)} className="text-green-600 shrink-0 p-0.5">
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </button>
+          </div>
+        )}
+
+        {/* ── To Ship summary banner (seller only) ── */}
+        {tab === 'Selling' && !isLoading && (() => {
+          const toShipCount = transactions.filter(
+            tx => tx.status === 'escrow_locked' && tx.fulfillment_method === 'delivery'
+          ).length;
+          const toHandoffCount = transactions.filter(
+            tx => tx.status === 'escrow_locked' && tx.fulfillment_method === 'handoff'
+          ).length;
+          if (toShipCount === 0 && toHandoffCount === 0) return null;
+          return (
+            <div className="flex flex-col gap-2 mb-lg">
+              {toShipCount > 0 && (
+                <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-md py-sm">
+                  <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-amber-600 text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>local_shipping</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-label-md text-label-md text-amber-800 font-bold">
+                      {toShipCount} item{toShipCount !== 1 ? 's' : ''} waiting to be shipped
+                    </p>
+                    <p className="font-body-sm text-body-sm text-amber-700">
+                      Pack and ship your orders — buyer is waiting!
+                    </p>
+                  </div>
+                  <span className="w-6 h-6 rounded-full bg-amber-500 text-white text-xs font-black flex items-center justify-center shrink-0">
+                    {toShipCount}
+                  </span>
+                </div>
+              )}
+              {toHandoffCount > 0 && (
+                <div className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-xl px-md py-sm">
+                  <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[#A855F7] text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>handshake</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-label-md text-label-md text-purple-800 font-bold">
+                      {toHandoffCount} handoff{toHandoffCount !== 1 ? 's' : ''} to arrange
+                    </p>
+                    <p className="font-body-sm text-body-sm text-purple-700">
+                      Coordinate meetup with your buyer.
+                    </p>
+                  </div>
+                  <span className="w-6 h-6 rounded-full bg-[#A855F7] text-white text-xs font-black flex items-center justify-center shrink-0">
+                    {toHandoffCount}
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Segmented Control */}
         <div className="flex w-full bg-surface-container-low rounded-lg p-1 mb-lg shadow-level-1">
           {['Buying', 'Selling'].map(t => (
@@ -220,7 +305,20 @@ export default function ActiveTransactionsScreen() {
             transactions.map(tx => {
               const isSeller = tab === 'Selling';
               const cfg      = STATUS_CONFIG[tx.status] ?? STATUS_CONFIG.pending;
-              const cta      = getCtaConfig(tx.status, isSeller);
+              const cta      = getCtaConfig(tx.status, isSeller, tx.fulfillment_method);
+
+              // Override status label for seller-side pending orders
+              const isToShip    = isSeller && tx.status === 'escrow_locked' && tx.fulfillment_method === 'delivery';
+              const isToHandoff = isSeller && tx.status === 'escrow_locked' && tx.fulfillment_method === 'handoff';
+              const statusLabel = isToShip    ? 'To Ship'
+                                : isToHandoff ? 'Arrange Meetup'
+                                : cfg.label;
+              const statusIcon  = isToShip    ? 'local_shipping'
+                                : isToHandoff ? 'handshake'
+                                : cfg.icon;
+              const statusColor = isToShip    ? 'text-amber-600'
+                                : isToHandoff ? 'text-[#A855F7]'
+                                : cfg.iconCls;
               return (
                 <div
                   key={tx.id}
@@ -254,13 +352,18 @@ export default function ActiveTransactionsScreen() {
 
                     <div className="flex flex-col gap-xs">
                       <div className="flex items-center gap-2">
-                        <span className={`material-symbols-outlined text-[16px] ${cfg.iconCls}`}
+                        <span className={`material-symbols-outlined text-[16px] ${statusColor}`}
                           style={{ fontVariationSettings: "'FILL' 1" }}>
-                          {cfg.icon}
+                          {statusIcon}
                         </span>
-                        <span className={`font-label-md text-label-md ${cfg.labelCls}`}>
-                          {cfg.label}
+                        <span className={`font-label-md text-label-md font-semibold ${statusColor}`}>
+                          {statusLabel}
                         </span>
+                        {(isToShip || isToHandoff) && (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            isToShip ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'
+                          }`}>Action Required</span>
+                        )}
                       </div>
                       {tx.meetup_location && (
                         <div className="flex items-center gap-2">

@@ -4,15 +4,18 @@ import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 
 const TYPE_CONFIG = {
-  new_message:     { icon: 'chat',           bg: 'bg-blue-100',   color: 'text-blue-600'   },
-  new_offer:       { icon: 'local_offer',    bg: 'bg-amber-100',  color: 'text-amber-600'  },
-  payment_escrow:  { icon: 'lock',           bg: 'bg-purple-100', color: 'text-[#A855F7]'  },
-  qr_generated:    { icon: 'qr_code_2',     bg: 'bg-indigo-100', color: 'text-indigo-600' },
-  order_confirmed: { icon: 'check_circle',   bg: 'bg-green-100',  color: 'text-green-600'  },
-  escrow_released: { icon: 'payments',       bg: 'bg-green-100',  color: 'text-green-600'  },
-  handoff_complete:{ icon: 'verified',       bg: 'bg-green-100',  color: 'text-green-600'  },
-  offer_accepted:  { icon: 'thumb_up',       bg: 'bg-green-100',  color: 'text-green-600'  },
-  offer_declined:  { icon: 'thumb_down',     bg: 'bg-red-100',    color: 'text-red-500'    },
+  new_message:        { icon: 'chat',           bg: 'bg-blue-100',   color: 'text-blue-600'   },
+  new_offer:          { icon: 'local_offer',    bg: 'bg-amber-100',  color: 'text-amber-600'  },
+  payment_escrow:     { icon: 'lock',           bg: 'bg-purple-100', color: 'text-[#A855F7]'  },
+  qr_generated:       { icon: 'qr_code_2',     bg: 'bg-indigo-100', color: 'text-indigo-600' },
+  seller_arrived:     { icon: 'location_on',   bg: 'bg-green-100',  color: 'text-green-600'  },
+  order_confirmed:    { icon: 'check_circle',   bg: 'bg-green-100',  color: 'text-green-600'  },
+  escrow_released:    { icon: 'payments',       bg: 'bg-green-100',  color: 'text-green-600'  },
+  handoff_complete:   { icon: 'verified',       bg: 'bg-green-100',  color: 'text-green-600'  },
+  offer_accepted:     { icon: 'thumb_up',       bg: 'bg-green-100',  color: 'text-green-600'  },
+  offer_declined:     { icon: 'thumb_down',     bg: 'bg-red-100',    color: 'text-red-500'    },
+  new_order_handoff:  { icon: 'handshake',      bg: 'bg-orange-100', color: 'text-orange-600' },
+  new_order_ship:     { icon: 'local_shipping', bg: 'bg-amber-100',  color: 'text-amber-600'  },
 };
 
 function relativeTime(iso) {
@@ -35,7 +38,16 @@ function getNavPath(n) {
     case 'new_offer':
     case 'offer_accepted':
     case 'offer_declined':
-      return d.chat_id ? `/chat/${d.chat_id}` : null;
+      return d.chat_id ? `/messages/${d.chat_id}` : null;
+    case 'new_order_handoff':
+      // Seller taps → goes directly to chat with buyer to arrange meetup
+      return d.chat_id ? `/messages/${d.chat_id}` : '/transactions';
+    case 'new_order_ship':
+      // Seller taps → goes to their active transactions to enter tracking
+      return d.tx_id ? `/escrow/${d.tx_id}` : '/transactions';
+    case 'seller_arrived':
+      // Go straight to QR confirm screen — buyer taps notification and scans
+      return d.tx_id ? `/handoff/confirm/${d.tx_id}` : null;
     case 'payment_escrow':
     case 'qr_generated':
     case 'order_confirmed':

@@ -12,8 +12,10 @@ export default function SecureHandoffScreen() {
   const [tx,        setTx]        = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error,     setError]     = useState('');
-  const [completing, setCompleting] = useState(false);
-  const [done,       setDone]       = useState(false);
+  const [completing,   setCompleting]   = useState(false);
+  const [done,         setDone]         = useState(false);
+  const [arrivedNotif, setArrivedNotif] = useState(false);
+  const [notifying,    setNotifying]    = useState(false);
 
   useEffect(() => {
     if (!txId) { setIsLoading(false); return; }
@@ -47,6 +49,19 @@ export default function SecureHandoffScreen() {
     setIsLoading(false);
   }
 
+  async function handleIveArrived() {
+    if (!tx?.buyer_id) return;
+    setNotifying(true);
+    await notify(tx.buyer_id, {
+      type:  'seller_arrived',
+      title: '📍 Your seller has arrived!',
+      body:  `Head to the meetup spot for "${tx.listing?.title ?? 'your item'}". Tap to scan the QR code.`,
+      data:  { tx_id: String(txId) },
+    });
+    setArrivedNotif(true);
+    setNotifying(false);
+  }
+
   // Seller can manually mark complete if buyer can't scan
   async function handleManualComplete() {
     if (!window.confirm('Mark this handoff as complete? Funds will be released to you.')) return;
@@ -56,8 +71,19 @@ export default function SecureHandoffScreen() {
       .update({ status: 'completed' })
       .eq('id', txId);
     setCompleting(false);
-    if (err) setError(err.message);
-    else setDone(true);
+    if (err) {
+      setError(err.message);
+    } else {
+      setDone(true);
+      if (tx?.buyer_id) {
+        notify(tx.buyer_id, {
+          type:  'handoff_complete',
+          title: 'Handoff confirmed',
+          body:  `The seller confirmed your handoff for "${tx.listing?.title ?? 'your item'}". Your escrow is complete.`,
+          data:  { tx_id: txId },
+        });
+      }
+    }
   }
 
   // The URL embedded in the QR — buyer scans and lands on HandoffConfirmScreen
@@ -102,6 +128,37 @@ export default function SecureHandoffScreen() {
           </div>
         ) : (
           <>
+            {/* ── I've Arrived notification button ── */}
+            {!arrivedNotif ? (
+              <div className="w-full flex flex-col gap-sm">
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl px-md py-sm flex items-start gap-sm">
+                  <span className="material-symbols-outlined text-amber-500 text-[16px] shrink-0 mt-0.5">info</span>
+                  <p className="font-body-sm text-body-sm text-amber-800 leading-snug">
+                    When you reach the meetup spot, tap the button below to notify the buyer to come and scan your QR.
+                  </p>
+                </div>
+                <button
+                  onClick={handleIveArrived}
+                  disabled={notifying || !tx?.buyer_id}
+                  className="w-full bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-sm shadow-lg transition-all active:scale-[0.98]"
+                >
+                  {notifying
+                    ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>location_on</span>
+                  }
+                  <span>{notifying ? 'Notifying Buyer…' : "📍 I've Arrived at Meetup!"}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="w-full bg-green-50 border border-green-200 rounded-2xl p-md flex items-center gap-md">
+                <span className="material-symbols-outlined text-green-600 text-[24px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                <div>
+                  <p className="font-label-md text-label-md text-green-800 font-bold">Buyer Notified!</p>
+                  <p className="font-body-sm text-body-sm text-green-700 mt-xs leading-snug">The buyer has been notified you've arrived. Show them the QR code below to scan.</p>
+                </div>
+              </div>
+            )}
+
             {/* QR code */}
             <div className="flex flex-col items-center gap-md">
               <p className="font-body-md text-body-md text-on-surface-variant text-center max-w-xs">
@@ -162,7 +219,17 @@ export default function SecureHandoffScreen() {
                 Buyer Can't Scan? Mark Complete Manually
               </button>
               <button
-                onClick={() => navigate('/report')}
+                onClick={() => navigate('/report', {
+                  state: {
+                    listingId:         tx?.listing?.id,
+                    sellerId:          tx?.seller_id,
+                    listingTitle:      tx?.listing?.title,
+                    listingImage:      tx?.listing?.image_url,
+                    fulfillmentMethod: 'handoff',
+                    amount:            tx?.amount,
+                    txId:              txId,
+                  },
+                })}
                 className="w-full border border-outline-variant text-on-surface-variant font-label-md text-label-md py-sm rounded-xl flex items-center justify-center gap-sm hover:bg-surface-container transition-colors"
               >
                 <span className="material-symbols-outlined text-[20px]">report</span>

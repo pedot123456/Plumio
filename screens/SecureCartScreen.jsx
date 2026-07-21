@@ -2,7 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 import { notify } from '../utils/notify';
+import DeliveryAddressModal  from '../components/DeliveryAddressModal';
+import MeetupLocationModal   from '../components/MeetupLocationModal';
+import FpxBankingModal       from '../components/FpxBankingModal';
+import DuitNowQrModal        from '../components/DuitNowQrModal';
 
 // ── Constants ──────────────────────────────────────────────────
 const SHIPPING_FEE = 5.00;
@@ -45,22 +50,54 @@ function SummaryRow({ label, value, bold, green }) {
 }
 
 export default function SecureCartScreen() {
-  const navigate    = useNavigate();
-  const { session } = useAuth();
+  const navigate         = useNavigate();
+  const { session }      = useAuth();
+  const { setCartCount } = useCart();
 
   const [cartItems,       setCartItems]       = useState([]);
   const [isLoading,       setIsLoading]       = useState(true);
   const [error,           setError]           = useState('');
-  const [fulfillment,     setFulfillment]     = useState('handoff'); // 'handoff' | 'delivery'
-  const [meetupLocation,  setMeetupLocation]  = useState('');
-  const [deliveryAddress, setDeliveryAddress] = useState('');
-  const [paymentMethod,   setPaymentMethod]   = useState('duitnow');
-  const [paying,          setPaying]          = useState(false);
+  const [fulfillment,      setFulfillment]      = useState('handoff'); // 'handoff' | 'delivery'
+  const [meetupDetails,    setMeetupDetails]    = useState(null);      // { landmark, stateArea, details }
+  const [deliveryAddress,  setDeliveryAddress]  = useState('');
+  const [paymentMethod,    setPaymentMethod]    = useState('duitnow');
+  const [paying,           setPaying]           = useState(false);
+  const [showAddressModal,  setShowAddressModal]  = useState(false);
+  const [showMeetupModal,   setShowMeetupModal]   = useState(false);
+  const [showFpxModal,      setShowFpxModal]      = useState(false);
+  const [showDuitNowModal,  setShowDuitNowModal]  = useState(false);
 
   useEffect(() => {
     if (!session) { setIsLoading(false); return; }
     fetchCart();
+    fetchDefaultAddress();
   }, [session]);
+
+  async function fetchDefaultAddress() {
+    if (!session) return;
+    const { data } = await supabase
+      .from('profiles')
+      .select('default_address')
+      .eq('id', session.user.id)
+      .single();
+    if (data?.default_address) {
+      const a = data.default_address;
+      const formatted = [
+        a.fullName, a.phone,
+        a.unitNo ? `${a.unitNo}, ${a.streetAddress}` : a.streetAddress,
+        a.postalCode, a.stateArea,
+      ].filter(Boolean).join(', ');
+      setDeliveryAddress(formatted);
+    }
+  }
+
+  async function handleSaveDefaultAddress(addressObj) {
+    if (!session) return;
+    await supabase.from('profiles').upsert(
+      { id: session.user.id, default_address: addressObj },
+      { onConflict: 'id' }
+    );
+  }
 
   async function fetchCart() {
     setIsLoading(true);
@@ -68,7 +105,7 @@ export default function SecureCartScreen() {
     const { data, error: err } = await supabase
       .from('cart_items')
       .select(`
-        id, quantity,
+        id, quantity, offer_price,
         listing:listings (
           id, title, price, image_url,
           location_label, user_id, seller_id
@@ -80,57 +117,137 @@ export default function SecureCartScreen() {
     if (err) { setError(err.message); }
     else {
       setCartItems(data ?? []);
-      const firstLoc = data?.find(i => i.listing?.location_label)?.listing?.location_label;
-      if (firstLoc) setMeetupLocation(firstLoc);
     }
     setIsLoading(false);
   }
 
-  const subtotal    = cartItems.reduce((s, i) => s + Number(i.listing?.price ?? 0) * i.quantity, 0);
+  // Build the meetup location string sent to the RPC and displayed in EscrowStatusScreen
+  const meetupLocationStr = meetupDetails
+    ? [meetupDetails.landmark, meetupDetails.stateArea].filter(Boolean).join(' · ')
+    : '';
+
+  // Use negotiated offer_price when set, otherwise fall back to listing's original price
+  const itemPrice   = (i) => Number(i.offer_price ?? i.listing?.price ?? 0);
+  const subtotal    = cartItems.reduce((s, i) => s + itemPrice(i) * i.quantity, 0);
   const shippingFee = fulfillment === 'delivery' ? SHIPPING_FEE : 0;
   const escrowFee   = subtotal * ESCROW_RATE;
   const total       = subtotal + shippingFee + escrowFee;
 
   async function handlePay() {
     if (!session || cartItems.length === 0) return;
-    const location = fulfillment === 'delivery' ? deliveryAddress.trim() : meetupLocation.trim();
-    if (!location) {
-      setError(fulfillment === 'delivery' ? 'Please enter a delivery address.' : 'Please enter a meetup location.');
+
+    // ── Validation ──────────────────────────────────────────────
+    if (fulfillment === 'delivery' && !deliveryAddress.trim()) {
+      setError('Please choose a delivery address before proceeding.');
       return;
     }
+    if (fulfillment === 'handoff' && !meetupLocationStr.trim()) {
+      setError('Please choose a meetup location.');
+      return;
+    }
+
     setPaying(true);
     setError('');
     try {
-      let firstTxId = null;
+      // Single atomic DB transaction via RPC — all items succeed or all roll back
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('checkout_cart', {
+        p_fulfillment_method: fulfillment,
+        p_meetup_location:    fulfillment === 'handoff'   ? meetupLocationStr      : null,
+        p_delivery_address:   fulfillment === 'delivery'  ? deliveryAddress.trim() : null,
+      });
+      if (rpcErr) throw rpcErr;
+
+      // RPC returns JSONB; `id` may be UUID string or bigint number — normalise to string
+      const result      = Array.isArray(rpcData) ? (rpcData[0] ?? {}) : (rpcData ?? {});
+      const first_tx_id = result.first_tx_id != null ? String(result.first_tx_id) : null;
+      const count       = result.count ?? 0;
+      // Snapshot cart items before clearing for the confirmation screen
+      const itemsSnapshot = [...cartItems];
+      setCartCount(0);
+
+      // Notifications are best-effort and fire outside the DB transaction
       for (const item of cartItems) {
-        const sellerId = item.listing?.user_id ?? item.listing?.seller_id;
-        const { data: tx, error: txErr } = await supabase
-          .from('transactions')
-          .insert({
-            listing_id:       item.listing.id,
-            amount:           total,
-            status:           'escrow_locked',
-            transaction_type: 'escrow',
-            meetup_location:  location,
-            ...(session.user.id && { buyer_id:  session.user.id }),
-            ...(sellerId         && { seller_id: sellerId }),
-          })
-          .select('id')
-          .single();
-        if (txErr) throw txErr;
-        if (tx && !firstTxId) firstTxId = tx.id;
-        // Notify seller that payment is locked in escrow
+        const sellerId  = item.listing?.user_id ?? item.listing?.seller_id;
+        const listingId = item.listing?.id;
+        const itemTitle = item.listing?.title ?? 'your item';
+        const price     = itemPrice(item);
+        const itemAmt   = `RM ${price.toFixed(2)}`;
+
         if (sellerId) {
-          await notify(sellerId, {
-            type:  'payment_escrow',
-            title: 'Payment held in escrow',
-            body:  `A buyer locked RM ${total.toFixed(2)} for "${item.listing?.title ?? 'your item'}"`,
-            data:  { tx_id: tx.id, listing_id: item.listing.id },
-          });
+          if (fulfillment === 'handoff') {
+            // Find or create a conversation so we can auto-send the escrow-lock message
+            let chatId = null;
+            try {
+              const { data: existing } = await supabase
+                .from('conversations')
+                .select('id')
+                .eq('buyer_id', session.user.id)
+                .eq('seller_id', sellerId)
+                .limit(1)
+                .maybeSingle();
+
+              if (existing?.id) {
+                chatId = existing.id;
+              } else {
+                const { data: created } = await supabase
+                  .from('conversations')
+                  .insert({ buyer_id: session.user.id, seller_id: sellerId, listing_id: listingId })
+                  .select('id')
+                  .single();
+                chatId = created?.id ?? null;
+              }
+
+              if (chatId) {
+                // Auto-message from buyer into the chat
+                await supabase.from('messages').insert({
+                  conversation_id: chatId,
+                  sender_id:       session.user.id,
+                  receiver_id:     sellerId,
+                  content:         `🔒 Escrow locked! My payment of ${itemAmt} for "${itemTitle}" is confirmed. Let's arrange our meetup — when and where works for you?`,
+                  type:            'text',
+                });
+              }
+            } catch (_) { /* non-fatal */ }
+
+            notify(sellerId, {
+              type:  'new_order_handoff',
+              title: `🤝 New order — arrange meetup`,
+              body:  `Buyer confirmed payment for "${itemTitle}" (${itemAmt}). Tap to open chat and coordinate meetup.`,
+              data:  { chat_id: chatId, tx_id: first_tx_id },
+            });
+          } else {
+            notify(sellerId, {
+              type:  'new_order_ship',
+              title: `📦 New order — please ship!`,
+              body:  `Pack and ship "${itemTitle}" (${itemAmt}) — funds locked in escrow until buyer confirms receipt.`,
+              data:  { tx_id: first_tx_id },
+            });
+          }
         }
+
+        // Confirm to buyer that their payment went through
+        notify(session.user.id, {
+          type:  'order_confirmed',
+          title: `✅ Order confirmed!`,
+          body:  fulfillment === 'delivery'
+            ? `Payment for "${itemTitle}" secured in escrow. Seller has been asked to ship it.`
+            : `Payment for "${itemTitle}" secured in escrow. Coordinate meetup details with the seller.`,
+          data:  { tx_id: first_tx_id },
+        });
       }
-      await supabase.from('cart_items').delete().eq('user_id', session.user.id);
-      navigate(`/escrow/${firstTxId}`, { state: { meetupLocation: location, total, fulfillmentMethod: fulfillment } });
+
+      navigate('/order-confirmed', {
+        state: {
+          txId:             first_tx_id,
+          count,
+          items:            itemsSnapshot,
+          fulfillmentMethod: fulfillment,
+          meetupLocation:   fulfillment === 'handoff'  ? meetupLocationStr      : null,
+          deliveryAddress:  fulfillment === 'delivery' ? deliveryAddress.trim() : null,
+          total,
+          paymentMethod,
+        },
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -217,10 +334,22 @@ export default function SecureCartScreen() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">{item.listing?.title}</p>
                     {item.quantity > 1 && <p className="text-xs text-gray-400 mt-0.5">Qty: {item.quantity}</p>}
+                  {item.offer_price != null && (
+                    <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                      ✅ Negotiated price
+                    </span>
+                  )}
                   </div>
-                  <p className="text-sm font-bold text-gray-900 shrink-0">
-                    RM {(Number(item.listing?.price ?? 0) * item.quantity).toFixed(2)}
-                  </p>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-bold text-gray-900">
+                      RM {(itemPrice(item) * item.quantity).toFixed(2)}
+                    </p>
+                    {item.offer_price != null && (
+                      <p className="text-xs text-gray-400 line-through">
+                        RM {(Number(item.listing?.price ?? 0) * item.quantity).toFixed(2)}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ))
             )}
@@ -261,37 +390,43 @@ export default function SecureCartScreen() {
           <div className="mt-4">
             {fulfillment === 'handoff' ? (
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-gray-500" htmlFor="meetup-input">
+                <label className="text-xs font-medium text-gray-500">
                   Meetup Location <span className="text-red-400">*</span>
                 </label>
-                <div className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2.5 focus-within:border-[#A855F7] focus-within:ring-2 focus-within:ring-[#A855F7]/20 bg-white transition-all">
+                <button
+                  type="button"
+                  onClick={() => setShowMeetupModal(true)}
+                  className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2.5 bg-white hover:border-[#A855F7] hover:ring-2 hover:ring-[#A855F7]/20 transition-all text-left w-full"
+                >
                   <span className="material-symbols-outlined text-[#A855F7] text-[18px] shrink-0">location_on</span>
-                  <input
-                    id="meetup-input"
-                    type="text"
-                    value={meetupLocation}
-                    onChange={e => { setMeetupLocation(e.target.value); if (error) setError(''); }}
-                    placeholder="e.g. UTP IRC, V5 Cafe, Block 22 Lobby…"
-                    className="flex-1 text-sm text-gray-800 placeholder:text-gray-400 bg-transparent focus:outline-none"
-                  />
-                </div>
+                  <span className={`flex-1 text-sm ${meetupLocationStr ? 'text-gray-800' : 'text-gray-400'}`}>
+                    {meetupLocationStr || 'Please state handoff address…'}
+                  </span>
+                  <span className="material-symbols-outlined text-gray-400 text-[18px] shrink-0">chevron_right</span>
+                </button>
+                {meetupDetails?.details && (
+                  <p className="text-xs text-gray-500 flex items-start gap-1 px-1 leading-snug">
+                    <span className="material-symbols-outlined text-[13px] text-gray-400 shrink-0 mt-0.5">info</span>
+                    {meetupDetails.details}
+                  </p>
+                )}
               </div>
             ) : (
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-gray-500" htmlFor="address-input">
+                <label className="text-xs font-medium text-gray-500">
                   Delivery Address <span className="text-red-400">*</span>
                 </label>
-                <div className="flex items-start gap-2 border border-gray-200 rounded-xl px-3 py-2.5 focus-within:border-[#A855F7] focus-within:ring-2 focus-within:ring-[#A855F7]/20 bg-white transition-all">
-                  <span className="material-symbols-outlined text-[#A855F7] text-[18px] shrink-0 mt-0.5">home</span>
-                  <textarea
-                    id="address-input"
-                    rows={2}
-                    value={deliveryAddress}
-                    onChange={e => { setDeliveryAddress(e.target.value); if (error) setError(''); }}
-                    placeholder="Block, unit number, street, postcode…"
-                    className="flex-1 text-sm text-gray-800 placeholder:text-gray-400 bg-transparent focus:outline-none resize-none"
-                  />
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddressModal(true)}
+                  className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2.5 bg-white hover:border-[#A855F7] hover:ring-2 hover:ring-[#A855F7]/20 transition-all text-left w-full"
+                >
+                  <span className="material-symbols-outlined text-[#A855F7] text-[18px] shrink-0">home</span>
+                  <span className={`flex-1 text-sm ${deliveryAddress ? 'text-gray-800' : 'text-gray-400'}`}>
+                    {deliveryAddress || 'Choose delivery address…'}
+                  </span>
+                  <span className="material-symbols-outlined text-gray-400 text-[18px] shrink-0">chevron_right</span>
+                </button>
               </div>
             )}
           </div>
@@ -323,34 +458,60 @@ export default function SecureCartScreen() {
         {/* ── 5. Payment Method ──────────────────────────────────── */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-4">Payment Method</p>
-          <div className="flex flex-col gap-3">
-            {PAYMENT_METHODS.map(method => (
-              <button
-                key={method.id}
-                onClick={() => setPaymentMethod(method.id)}
-                className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition-all ${
-                  paymentMethod === method.id ? 'border-[#A855F7] bg-purple-50' : 'border-gray-200 hover:border-purple-200 bg-white'
-                }`}
-              >
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                  paymentMethod === method.id ? 'bg-[#A855F7] text-white' : 'bg-gray-100 text-gray-500'
-                }`}>
-                  <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>{method.icon}</span>
+
+          {fulfillment === 'handoff' ? (
+            /* Handoff: no payment gateway — escrow locked directly on confirmation */
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3 rounded-xl border-2 border-[#A855F7] bg-purple-50 px-4 py-4">
+                <div className="w-12 h-12 rounded-full bg-[#A855F7] text-white flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-[24px]" style={{ fontVariationSettings: "'FILL' 1" }}>lock</span>
                 </div>
                 <div className="flex-1">
-                  <p className={`text-sm font-semibold ${paymentMethod === method.id ? 'text-[#7C3AED]' : 'text-gray-800'}`}>{method.label}</p>
-                  <p className="text-xs text-gray-400">{method.description}</p>
+                  <p className="text-sm font-bold text-[#7C3AED]">Escrow Lock</p>
+                  <p className="text-xs text-purple-500 mt-0.5">Funds locked instantly upon confirmation</p>
                 </div>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
-                  paymentMethod === method.id ? 'border-[#A855F7] bg-[#A855F7]' : 'border-gray-300'
-                }`}>
-                  {paymentMethod === method.id && (
-                    <span className="material-symbols-outlined text-white text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-                  )}
+                <div className="w-5 h-5 rounded-full border-2 border-[#A855F7] bg-[#A855F7] flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-white text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
                 </div>
-              </button>
-            ))}
-          </div>
+              </div>
+              <div className="flex items-start gap-2 bg-purple-50 border border-purple-100 rounded-xl px-3 py-2.5">
+                <span className="material-symbols-outlined text-[#A855F7] text-[16px] shrink-0 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>info</span>
+                <p className="text-xs text-purple-700 leading-relaxed">
+                  For face-to-face handoffs, your funds are <span className="font-semibold">locked in escrow immediately</span> when you tap "Lock Escrow" below. No payment gateway needed — the seller is notified and will head to the meetup spot. You'll get a notification when they arrive.
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* Delivery: all payment methods available */
+            <div className="flex flex-col gap-3">
+              {PAYMENT_METHODS.map(method => (
+                <button
+                  key={method.id}
+                  onClick={() => setPaymentMethod(method.id)}
+                  className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition-all ${
+                    paymentMethod === method.id ? 'border-[#A855F7] bg-purple-50' : 'border-gray-200 hover:border-purple-200 bg-white'
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                    paymentMethod === method.id ? 'bg-[#A855F7] text-white' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>{method.icon}</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-sm font-semibold ${paymentMethod === method.id ? 'text-[#7C3AED]' : 'text-gray-800'}`}>{method.label}</p>
+                    <p className="text-xs text-gray-400">{method.description}</p>
+                  </div>
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                    paymentMethod === method.id ? 'border-[#A855F7] bg-[#A855F7]' : 'border-gray-300'
+                  }`}>
+                    {paymentMethod === method.id && (
+                      <span className="material-symbols-outlined text-white text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
       </main>
@@ -358,29 +519,107 @@ export default function SecureCartScreen() {
       {/* ── Sticky Pay Button ────────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 w-full z-50 px-4 pb-6 pt-3 bg-gradient-to-t from-white via-white/95 to-transparent">
         <div className="max-w-2xl mx-auto">
-          <button
-            onClick={handlePay}
-            disabled={paying || isLoading || cartItems.length === 0}
-            className="w-full bg-[#A855F7] hover:bg-[#9333EA] disabled:bg-purple-300 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-200/60 disabled:cursor-not-allowed text-base active:scale-[0.98]"
-          >
-            {paying ? (
-              <>
-                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Processing…
-              </>
-            ) : (
-              <>
-                <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>lock</span>
-                Pay to Escrow · RM {total.toFixed(2)}
-              </>
-            )}
-          </button>
+          {fulfillment === 'handoff' ? (
+            /* Handoff: lock escrow directly — no payment modal */
+            <button
+              onClick={() => {
+                if (!meetupLocationStr.trim()) {
+                  setError('Please choose a meetup location before proceeding.'); return;
+                }
+                setError('');
+                handlePay();
+              }}
+              disabled={paying || isLoading || cartItems.length === 0}
+              className="w-full bg-[#A855F7] hover:bg-[#9333EA] disabled:bg-purple-300 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-200/60 disabled:cursor-not-allowed text-base active:scale-[0.98]"
+            >
+              {paying ? (
+                <>
+                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Locking Escrow…
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>lock</span>
+                  Lock Escrow · RM {total.toFixed(2)}
+                </>
+              )}
+            </button>
+          ) : (
+            /* Delivery: open payment modal */
+            <button
+              onClick={() => {
+                if (!deliveryAddress.trim()) {
+                  setError('Please choose a delivery address before proceeding.'); return;
+                }
+                setError('');
+                if (paymentMethod !== 'fpx') {
+                  setShowDuitNowModal(true);
+                } else {
+                  setShowFpxModal(true);
+                }
+              }}
+              disabled={paying || isLoading || cartItems.length === 0}
+              className="w-full bg-[#A855F7] hover:bg-[#9333EA] disabled:bg-purple-300 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-200/60 disabled:cursor-not-allowed text-base active:scale-[0.98]"
+            >
+              {paying ? (
+                <>
+                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Processing…
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>lock</span>
+                  Pay to Escrow · RM {total.toFixed(2)}
+                </>
+              )}
+            </button>
+          )}
           <p className="text-center text-[11px] text-gray-400 mt-2 flex items-center justify-center gap-1">
             <span className="material-symbols-outlined text-[13px]">shield</span>
             Secured by Plumio Escrow · Funds held until confirmed
           </p>
         </div>
       </div>
+
+      {showAddressModal && (
+        <DeliveryAddressModal
+          onClose={() => setShowAddressModal(false)}
+          onSaveDefault={handleSaveDefaultAddress}
+          onSelect={addr => {
+            setDeliveryAddress(addr);
+            if (error) setError('');
+            setShowAddressModal(false);
+          }}
+        />
+      )}
+
+      {showMeetupModal && (
+        <MeetupLocationModal
+          onClose={() => setShowMeetupModal(false)}
+          onSelect={loc => {
+            setMeetupDetails(loc);
+            if (error) setError('');
+          }}
+        />
+      )}
+
+      {showFpxModal && (
+        <FpxBankingModal
+          total={total}
+          orderId={`PLM-${Date.now().toString(36).toUpperCase()}`}
+          onClose={() => setShowFpxModal(false)}
+          onApprove={() => { setShowFpxModal(false); handlePay(); }}
+        />
+      )}
+
+      {showDuitNowModal && (
+        <DuitNowQrModal
+          total={total}
+          orderId={`PLM-${Date.now().toString(36).toUpperCase()}`}
+          onClose={() => setShowDuitNowModal(false)}
+          onApprove={() => { setShowDuitNowModal(false); handlePay(); }}
+        />
+      )}
     </div>
   );
 }

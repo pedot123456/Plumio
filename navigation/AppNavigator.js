@@ -19,7 +19,8 @@ import SignUpScreen          from '../screens/SignUpScreen';
 import ForgotPasswordScreen  from '../screens/ForgotPasswordScreen';
 import BrowseCategoriesScreen from '../screens/BrowseCategoriesScreen';
 import MyListingsScreen      from '../screens/MyListingsScreen';
-import ReportIssueScreen     from '../screens/ReportIssueScreen';
+import ReportIssueScreen          from '../screens/ReportIssueScreen';
+import OrderConfirmationScreen    from '../screens/OrderConfirmationScreen';
 import WalletScreen          from '../screens/WalletScreen';
 import LikesScreen           from '../screens/LikesScreen';
 import SettingsScreen        from '../screens/SettingsScreen';
@@ -67,7 +68,8 @@ export default function AppNavigator() {
         <Route path="/auth/callback"   element={<HomeScreen />} />
         <Route path="/categories"      element={<BrowseCategoriesScreen />} />
         <Route path="/my-listings"     element={<MyListingsScreen />} />
-        <Route path="/report"          element={<ReportIssueScreen />} />
+        <Route path="/report"            element={<ReportIssueScreen />} />
+        <Route path="/order-confirmed"  element={<OrderConfirmationScreen />} />
 
         {/* Profile sub-screens — global nav header provided by MainLayout */}
         <Route path="/wallet"          element={<WalletScreen />} />

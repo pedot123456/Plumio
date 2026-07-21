@@ -57,9 +57,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Send, Package, ImagePlus, Loader2 } from 'lucide-react';
+import { ArrowLeft, Send, Package, ImagePlus, Loader2, ShoppingCart, Check, X } from 'lucide-react';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,12 +86,15 @@ export default function ChatRoomPage() {
   const inputRef     = useRef(null);
   const fileInputRef = useRef(null);
 
-  const [convo,     setConvo]     = useState(null);
-  const [messages,  setMessages]  = useState([]);
-  const [inputText, setInputText] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSending, setIsSending] = useState(false);
-  const [error,     setError]     = useState('');
+  const { addToCart } = useCart();
+
+  const [convo,       setConvo]       = useState(null);
+  const [messages,    setMessages]    = useState([]);
+  const [inputText,   setInputText]   = useState('');
+  const [isLoading,   setIsLoading]   = useState(true);
+  const [isSending,   setIsSending]   = useState(false);
+  const [cartAdding,  setCartAdding]  = useState(false);
+  const [error,       setError]       = useState('');
 
   // ── 1. Fetch conversation metadata (other user + item) ────────────────────
   useEffect(() => {
@@ -112,7 +116,7 @@ export default function ChatRoomPage() {
       const [{ data: profiles }, { data: listing }] = await Promise.all([
         supabase.from('profiles').select('id, full_name, avatar_url').in('id', userIds),
         listingId
-          ? supabase.from('listings').select('id, title').eq('id', listingId).maybeSingle()
+          ? supabase.from('listings').select('id, title, price').eq('id', listingId).maybeSingle()
           : Promise.resolve({ data: null }),
       ]);
 
@@ -296,12 +300,98 @@ export default function ChatRoomPage() {
     }
   }
 
+  // ── Offer helpers ─────────────────────────────────────────────────────────
+
+  // Detects offer messages regardless of how they were sent (typed or programmatic)
+  function isOfferMsg(msg) {
+    return msg.type === 'offer' ||
+      (msg.type === 'text' && /^Offer:\s*RM\s*[\d.]+/i.test(msg.content ?? ''));
+  }
+
+  // Extracts the numeric offer price from any offer message content
+  function parseOfferPrice(content = '') {
+    try { const p = JSON.parse(content); if (p?.price != null) return Number(p.price); } catch {}
+    const m = (content || '').match(/Offer:\s*RM\s*([\d.]+)/i);
+    return m ? parseFloat(m[1]) : null;
+  }
+
+  // Seller taps Accept — inserts an offer_accepted message the buyer sees in real-time
+  async function acceptOffer(offerPrice) {
+    const listingId = listing?.id ?? convo?.item_id ?? convo?.listing_id ?? null;
+    await supabase.from('messages').insert({
+      conversation_id: chatId,
+      sender_id:       currentUserId,
+      receiver_id:     convo?.buyer_id,
+      content:         JSON.stringify({ price: offerPrice, listing_id: listingId, title: listing?.title }),
+      type:            'offer_accepted',
+    });
+    await supabase.from('conversations')
+      .update({ last_message: `✅ Offer accepted · RM ${Number(offerPrice).toFixed(2)}`, last_message_at: new Date().toISOString() })
+      .eq('id', chatId);
+  }
+
+  // Seller taps Decline — inserts an offer_declined notice
+  async function declineOffer() {
+    await supabase.from('messages').insert({
+      conversation_id: chatId,
+      sender_id:       currentUserId,
+      receiver_id:     convo?.buyer_id,
+      content:         JSON.stringify({ declined: true }),
+      type:            'offer_declined',
+    });
+    await supabase.from('conversations')
+      .update({ last_message: 'Offer declined', last_message_at: new Date().toISOString() })
+      .eq('id', chatId);
+  }
+
+  // Buyer taps Add to Cart on an accepted offer card — stores the negotiated price
+  async function addOfferToCart(listingId, offerPrice) {
+    if (!currentUserId || !listingId || cartAdding) return;
+    setCartAdding(true);
+
+    // Try a plain INSERT first
+    const { error: insertErr } = await supabase.from('cart_items').insert({
+      user_id:     currentUserId,
+      listing_id:  listingId,
+      quantity:    1,
+      offer_price: offerPrice,
+    });
+
+    if (insertErr) {
+      if (insertErr.code === '23505') {
+        // Row already exists — just update the offer_price on the existing row
+        const { error: updateErr } = await supabase
+          .from('cart_items')
+          .update({ offer_price: offerPrice, quantity: 1 })
+          .eq('user_id', currentUserId)
+          .eq('listing_id', listingId);
+
+        if (updateErr) {
+          setError('Could not add to cart. Please try again.');
+          setCartAdding(false);
+          return;
+        }
+      } else {
+        setError('Could not add to cart. Please try again.');
+        setCartAdding(false);
+        return;
+      }
+    } else {
+      addToCart(); // bump cart badge count only for new rows
+    }
+
+    navigate('/cart');
+    setCartAdding(false);
+  }
+
   // ── Derived values ────────────────────────────────────────────────────────
-  const otherUser  = convo
-    ? (convo.buyer_id === currentUserId ? convo.seller : convo.buyer)
+  const isBuyer   = convo?.buyer_id  === currentUserId;
+  const isSeller  = convo?.seller_id === currentUserId;
+  const otherUser = convo
+    ? (isBuyer ? convo.seller : convo.buyer)
     : null;
-  const otherName  = otherUser?.full_name ?? (isLoading ? '…' : 'Unknown User');
-  const listing    = convo?.listing ?? null;
+  const otherName = otherUser?.full_name ?? (isLoading ? '…' : 'Unknown User');
+  const listing   = convo?.listing ?? null;
 
   // ── Not-found fallback ────────────────────────────────────────────────────
   if (!isLoading && !convo) {
@@ -394,62 +484,136 @@ export default function ChatRoomPage() {
           {isLoading
             ? Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-                  <div
-                    className="h-10 rounded-2xl bg-gray-200 animate-pulse"
-                    style={{ width: `${110 + i * 22}px` }}
-                  />
+                  <div className="h-10 rounded-2xl bg-gray-200 animate-pulse" style={{ width: `${110 + i * 22}px` }} />
                 </div>
               ))
             : messages.map(msg => {
                 const isMe = msg.sender_id === currentUserId;
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-                  >
-                    {msg.type === 'image' ? (
-                      /* ── Image bubble ── */
-                      <div
-                        className={`max-w-[72%] overflow-hidden rounded-2xl shadow-sm ${
-                          isMe
-                            ? 'rounded-br-sm ring-2 ring-[#A855F7]/30'
-                            : 'rounded-bl-sm border border-gray-100'
-                        }`}
-                      >
-                        <img
-                          src={msg.content}
-                          alt="Shared image"
-                          className="block w-full object-cover max-h-64"
-                        />
-                        <div
-                          className={`px-3 py-1.5 text-[10px] text-right flex items-center justify-end gap-1.5 ${
-                            isMe ? 'bg-[#A855F7] text-purple-200' : 'bg-white text-gray-400'
-                          }`}
-                        >
+
+                /* ── Offer card ─────────────────────────────────────────── */
+                if (isOfferMsg(msg)) {
+                  const price = parseOfferPrice(msg.content);
+                  return (
+                    <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`w-64 rounded-2xl overflow-hidden border shadow-sm ${isMe ? 'rounded-br-sm border-purple-200' : 'rounded-bl-sm border-gray-200'}`}>
+                        <div className={`px-4 py-3 ${isMe ? 'bg-purple-50' : 'bg-white'}`}>
+                          <p className="text-[11px] font-semibold text-purple-500 uppercase tracking-wide mb-1">💰 Price Offer</p>
+                          <p className="text-2xl font-bold text-gray-900">RM {price != null ? Number(price).toFixed(2) : '—'}</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">{formatMsgTime(msg.created_at)}</p>
+                        </div>
+                        {/* Seller sees Accept/Decline — only on messages the buyer sent */}
+                        {isSeller && !isMe && price != null && (
+                          <div className="flex border-t border-gray-100">
+                            <button
+                              onClick={() => acceptOffer(price)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold text-green-600 hover:bg-green-50 active:bg-green-100 transition-colors"
+                            >
+                              <Check size={14} /> Accept
+                            </button>
+                            <div className="w-px bg-gray-100" />
+                            <button
+                              onClick={declineOffer}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold text-gray-400 hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                            >
+                              <X size={14} /> Decline
+                            </button>
+                          </div>
+                        )}
+                        {/* Buyer sees pending status on their own offer */}
+                        {isBuyer && isMe && (
+                          <div className="px-4 pb-3 bg-purple-50">
+                            <p className="text-[11px] text-purple-400 italic">Awaiting seller response…</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                /* ── Offer accepted card ────────────────────────────────── */
+                if (msg.type === 'offer_accepted') {
+                  let meta = {};
+                  try { meta = JSON.parse(msg.content); } catch {}
+                  const price      = meta.price != null ? Number(meta.price).toFixed(2) : '—';
+                  const listingId  = meta.listing_id ?? listing?.id ?? null;
+                  const itemTitle  = meta.title ?? listing?.title ?? 'Item';
+                  return (
+                    <div key={msg.id} className="flex justify-center my-2">
+                      <div className="w-72 rounded-2xl overflow-hidden border border-green-200 shadow-md">
+                        <div className="bg-green-50 px-4 pt-4 pb-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-7 h-7 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                              <Check size={14} className="text-white" strokeWidth={3} />
+                            </div>
+                            <p className="text-sm font-bold text-green-700">Offer Accepted!</p>
+                          </div>
+                          <p className="text-2xl font-bold text-gray-900">RM {price}</p>
+                          <p className="text-xs text-gray-500 mt-0.5 truncate">{itemTitle}</p>
+                          <p className="text-[10px] text-gray-400 mt-1">{formatMsgTime(msg.created_at)}</p>
+                        </div>
+                        {/* Buyer: Add to Cart button */}
+                        {isBuyer && listingId && (
+                          <div className="bg-white px-4 py-3 border-t border-green-100">
+                            <button
+                              onClick={() => addOfferToCart(listingId, parseFloat(price))}
+                              disabled={cartAdding}
+                              className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#A855F7] hover:bg-[#9333EA] active:bg-[#7E22CE] text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60"
+                            >
+                              {cartAdding
+                                ? <Loader2 size={15} className="animate-spin" />
+                                : <ShoppingCart size={15} />
+                              }
+                              {cartAdding ? 'Adding…' : 'Add to Cart'}
+                            </button>
+                          </div>
+                        )}
+                        {/* Seller: confirmation label */}
+                        {isSeller && (
+                          <div className="bg-white px-4 py-3 border-t border-green-100">
+                            <p className="text-xs text-gray-500 text-center">The buyer can now add this item to their cart.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                /* ── Offer declined card ────────────────────────────────── */
+                if (msg.type === 'offer_declined') {
+                  return (
+                    <div key={msg.id} className="flex justify-center my-2">
+                      <div className="flex items-center gap-2 bg-gray-100 text-gray-500 text-xs font-medium px-4 py-2 rounded-full">
+                        <X size={12} /> Offer was declined
+                      </div>
+                    </div>
+                  );
+                }
+
+                /* ── Image bubble ─────────────────────────────────────── */
+                if (msg.type === 'image') {
+                  return (
+                    <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[72%] overflow-hidden rounded-2xl shadow-sm ${isMe ? 'rounded-br-sm ring-2 ring-[#A855F7]/30' : 'rounded-bl-sm border border-gray-100'}`}>
+                        <img src={msg.content} alt="Shared image" className="block w-full object-cover max-h-64" />
+                        <div className={`px-3 py-1.5 text-[10px] text-right flex items-center justify-end gap-1.5 ${isMe ? 'bg-[#A855F7] text-purple-200' : 'bg-white text-gray-400'}`}>
                           {msg._tempId && <span className="opacity-70">Uploading…</span>}
                           {formatMsgTime(msg.created_at)}
                         </div>
                       </div>
-                    ) : (
-                      /* ── Text bubble ── */
-                      <div
-                        className={`max-w-[72%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                          isMe
-                            ? 'bg-[#A855F7] text-white rounded-br-sm'
-                            : 'bg-white text-gray-800 border border-gray-100 shadow-sm rounded-bl-sm'
-                        }`}
-                      >
-                        <p>{msg.content}</p>
-                        <p
-                          className={`text-[10px] mt-1 text-right flex items-center justify-end gap-1.5 ${
-                            isMe ? 'text-purple-200' : 'text-gray-400'
-                          }`}
-                        >
-                          {msg._tempId && <span className="opacity-70">Sending…</span>}
-                          {formatMsgTime(msg.created_at)}
-                        </p>
-                      </div>
-                    )}
+                    </div>
+                  );
+                }
+
+                /* ── Plain text bubble (default) ──────────────────────── */
+                return (
+                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[72%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${isMe ? 'bg-[#A855F7] text-white rounded-br-sm' : 'bg-white text-gray-800 border border-gray-100 shadow-sm rounded-bl-sm'}`}>
+                      <p>{msg.content}</p>
+                      <p className={`text-[10px] mt-1 text-right flex items-center justify-end gap-1.5 ${isMe ? 'text-purple-200' : 'text-gray-400'}`}>
+                        {msg._tempId && <span className="opacity-70">Sending…</span>}
+                        {formatMsgTime(msg.created_at)}
+                      </p>
+                    </div>
                   </div>
                 );
               })

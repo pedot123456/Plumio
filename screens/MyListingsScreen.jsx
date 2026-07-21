@@ -149,13 +149,22 @@ export default function MyListingsScreen() {
           <h1 className="font-headline-md text-headline-md text-primary font-bold text-center flex-1">
             My Listings
           </h1>
-          <button
-            className="text-primary hover:bg-surface-container-high transition-colors p-2 rounded-full"
-            onClick={() => navigate('/create-listing')}
-            title="New Listing"
-          >
-            <span className="material-symbols-outlined">add</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              className="text-primary hover:bg-surface-container-high transition-colors p-2 rounded-full"
+              onClick={() => navigate('/')}
+              title="Go to Home"
+            >
+              <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>storefront</span>
+            </button>
+            <button
+              className="text-primary hover:bg-surface-container-high transition-colors p-2 rounded-full"
+              onClick={() => navigate('/create-listing')}
+              title="New Listing"
+            >
+              <span className="material-symbols-outlined">add</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -233,11 +242,16 @@ export default function MyListingsScreen() {
                       onClick={() => navigate(`/product/${item.id}`)}
                     >
                       {item.image_url
-                        ? <img className="w-full h-full object-cover" src={item.image_url} alt={item.title} />
-                        : <div className="w-full h-full flex items-center justify-center">
-                            <span className="material-symbols-outlined text-[32px] text-outline-variant">image</span>
-                          </div>
-                      }
+                        ? <img
+                            className="w-full h-full object-cover"
+                            src={item.image_url}
+                            alt={item.title}
+                            onError={e => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling?.style && (e.currentTarget.nextSibling.style.display = 'flex'); }}
+                          />
+                        : null}
+                      <div className="w-full h-full items-center justify-center" style={{ display: item.image_url ? 'none' : 'flex' }}>
+                        <span className="material-symbols-outlined text-[32px] text-outline-variant">image</span>
+                      </div>
                     </div>
 
                     {/* Info */}

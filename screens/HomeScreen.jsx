@@ -159,6 +159,7 @@ export default function HomeScreen() {
                     title={item.title ?? item.name}
                     price={Number(item.price).toFixed(2)}
                     image={item.image_url}
+                    mediaUrls={item.media_urls}
                     badge={item.badge ?? item.label ?? undefined}
                     badgeVariant={item.badge_variant ?? undefined}
                     onClick={!session ? () => navigate('/login') : undefined}

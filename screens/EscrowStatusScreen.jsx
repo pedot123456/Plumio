@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+import OrderReceivedModal from '../components/OrderReceivedModal';
 
 const HANDOFF_STEPS = [
   { icon: 'handshake',      text: 'Meet the seller at the agreed location'         },
@@ -47,6 +48,7 @@ export default function EscrowStatusScreen() {
   const { session } = useAuth();
 
   const passedLocation  = location.state?.meetupLocation    ?? '';
+  const passedAddress   = location.state?.deliveryAddress   ?? '';
   const passedTotal     = location.state?.total             ?? null;
   const passedMethod    = location.state?.fulfillmentMethod ?? 'handoff';
 
@@ -55,6 +57,11 @@ export default function EscrowStatusScreen() {
   const [error,           setError]           = useState('');
   const [confirming,      setConfirming]      = useState(false);
   const [confirmed,       setConfirmed]       = useState(false);
+  const [currentStep,     setCurrentStep]     = useState(1);
+  const [showToast,       setShowToast]       = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [sellerArrived,   setSellerArrived]   = useState(false);
+  const [chatLoading,     setChatLoading]     = useState(false);
 
   // Shipping tracking fields (seller entry)
   const [courier,         setCourier]         = useState('');
@@ -67,24 +74,99 @@ export default function EscrowStatusScreen() {
     fetchTransaction();
   }, [txId]);
 
+  // Auto-progress simulation for prototype demo (delivery mode only)
+  useEffect(() => {
+    if (passedMethod !== 'delivery') return;
+    if (currentStep >= 5) return;
+    const timer = setTimeout(() => {
+      setCurrentStep(prev => {
+        const next = prev + 1;
+        if (next >= 4) setShowToast(true);
+        return next;
+      });
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [currentStep, passedMethod]);
+
+  // Real-time: listen for seller_arrived notifications (handoff mode, buyer side)
+  useEffect(() => {
+    if (!session?.user?.id || !txId) return;
+    const ch = supabase
+      .channel(`seller_arrived_${txId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${session.user.id}`,
+      }, (payload) => {
+        const n = payload.new;
+        if (n?.type === 'seller_arrived' && String(n?.data?.tx_id) === String(txId)) {
+          setSellerArrived(true);
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [session?.user?.id, txId]);
+
   async function fetchTransaction() {
     setIsLoading(true);
+
+    // Route guard: unauthenticated users go to login
+    if (!session?.user?.id) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
     const { data, error: err } = await supabase
       .from('transactions')
       .select(`
-        id, status, amount, meetup_location,
+        id, status, amount,
+        meetup_location, delivery_address, fulfillment_method,
         buyer_id, seller_id,
         courier, tracking_number,
         listing:listings (id, title, price, image_url)
       `)
       .eq('id', txId)
       .single();
-    if (err) setError(err.message);
-    else setTx(data);
+
+    if (err) {
+      setError(err.message);
+      setIsLoading(false);
+      return;
+    }
+
+    const userId = session.user.id;
+
+    // Seller accidentally opened the buyer tracking URL — send to their QR screen
+    if (data.seller_id && userId === data.seller_id) {
+      navigate(`/handoff/${data.id}`, { replace: true });
+      return;
+    }
+
+    // Neither buyer nor seller for this transaction — unauthorized
+    if (data.buyer_id && userId !== data.buyer_id) {
+      navigate('/transactions', { replace: true });
+      return;
+    }
+
+    // Fetch seller name separately — no FK from transactions→profiles exists yet
+    let sellerName = null;
+    if (data.seller_id) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', data.seller_id)
+        .single();
+      sellerName = profile?.full_name ?? null;
+    }
+
+    setTx({ ...data, seller: { full_name: sellerName } });
+    if (data.status === 'completed') setConfirmed(true);
     setIsLoading(false);
   }
 
   async function handleConfirmReceipt() {
+    if (!isDelivery) return; // Handoff escrow is released only via QR scan
     if (!window.confirm('Confirm you have received the item? This will release funds to the seller and cannot be undone.')) return;
     setConfirming(true);
     const { error: err } = await supabase
@@ -92,8 +174,8 @@ export default function EscrowStatusScreen() {
       .update({ status: 'completed' })
       .eq('id', txId);
     setConfirming(false);
-    if (err) setError(err.message);
-    else setConfirmed(true);
+    if (err) { setError(err.message); }
+    else { setConfirmed(true); setShowReviewModal(true); }
   }
 
   async function handleSubmitTracking() {
@@ -113,57 +195,74 @@ export default function EscrowStatusScreen() {
     }
   }
 
-  const meetupLoc   = tx?.meetup_location ?? passedLocation;
-  const amount      = tx?.amount          ?? passedTotal;
-  const isSeller    = session?.user?.id === tx?.seller_id;
-  const isCompleted = tx?.status === 'completed' || confirmed;
-  const isDelivery  = passedMethod === 'delivery';
-  const hasTracking = !!tx?.tracking_number;
+  async function openSellerChat() {
+    const sellerId = tx?.seller_id;
+    const myId     = session?.user?.id;
+    if (!sellerId || !myId) { navigate('/messages'); return; }
 
-  // Progress step: 0=Paid, 1=Packed(unused), 2=Shipped, 3=Delivered(unused), 4=Done
-  const progressStep = isCompleted ? 4 : hasTracking ? 2 : 0;
+    setChatLoading(true);
+    try {
+      const { data: existing } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('buyer_id', myId)
+        .eq('seller_id', sellerId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existing?.id) { navigate(`/messages/${existing.id}`); return; }
+
+      const { data: created } = await supabase
+        .from('conversations')
+        .insert({ buyer_id: myId, seller_id: sellerId })
+        .select('id')
+        .single();
+
+      navigate(created?.id ? `/messages/${created.id}` : '/messages');
+    } catch {
+      navigate('/messages');
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
+  async function handleReviewSubmit({ rating, review }) {
+    try {
+      await supabase.from('reviews').insert({
+        listing_id:  tx?.listing?.id,
+        reviewer_id: session?.user?.id,
+        rating,
+        comment: review,
+      });
+    } catch (_) { /* non-blocking */ }
+    navigate('/');
+  }
+
+  const meetupLoc    = tx?.meetup_location ?? passedLocation;
+  const amount       = tx?.amount          ?? passedTotal;
+  const isSeller     = session?.user?.id === tx?.seller_id;
+  const isCompleted  = tx?.status === 'completed' || confirmed || currentStep >= 5;
+  // Use DB fulfillment_method as fallback when navigation state is absent (e.g. on refresh)
+  const isDelivery   = (passedMethod || tx?.fulfillment_method) === 'delivery';
+  const displayAddr  = isDelivery
+    ? (passedAddress || tx?.delivery_address || '')
+    : (meetupLoc || '');
+  const hasTracking  = !!tx?.tracking_number;
 
   const courierLabel = MY_COURIERS.find(c => c.value === tx?.courier)?.label ?? tx?.courier ?? '';
 
-  // Delivery status banner copy
-  const deliveryTitle = isCompleted
-    ? 'Order Complete'
-    : hasTracking
-      ? 'In Transit · Track Your Package'
-      : 'Order Confirmed · Awaiting Shipment';
-  const deliverySubtitle = isCompleted
-    ? 'Funds have been released to the seller.'
-    : hasTracking
-      ? `Shipped via ${courierLabel}. Tap "I've Received My Item" once it arrives.`
-      : 'Your payment is locked in escrow — seller is preparing your item.';
-
-  // ── Confirmed success overlay ────────────────────────────────
-  if (confirmed) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4" style={{ fontFamily: "'Inter', sans-serif" }}>
-        <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-xl flex flex-col items-center text-center gap-5">
-          <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
-            <span className="material-symbols-outlined text-green-500" style={{ fontSize: 44, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-          </div>
-          <div>
-            <h2 className="font-bold text-gray-900 text-xl mb-1">Receipt Confirmed!</h2>
-            <p className="text-gray-500 text-sm leading-relaxed">
-              Funds of <span className="font-semibold text-gray-800">RM {Number(amount ?? 0).toFixed(2)}</span> have been released to the seller. Thank you for using Plumio Escrow.
-            </p>
-          </div>
-          <div className="w-full flex flex-col gap-3">
-            <button onClick={() => navigate('/')} className="w-full bg-[#A855F7] hover:bg-[#9333EA] text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">home</span>
-              Back to Home
-            </button>
-            <button onClick={() => navigate('/transactions')} className="w-full border border-gray-200 text-gray-600 font-medium py-3 rounded-xl hover:bg-gray-50 transition-colors">
-              View Transactions
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Per-step status copy (delivery mode)
+  const STEP_COPY = [
+    null,
+    { title: 'Order Confirmed · Awaiting Shipment',   subtitle: 'Your payment is locked in escrow — seller is preparing your item.',   icon: 'inventory_2'    },
+    { title: 'Packed · Awaiting Collection',          subtitle: 'Seller has packed your item and is waiting for courier pickup.',        icon: 'inventory_2'    },
+    { title: 'In Transit · On the Way',               subtitle: 'Your item is with the courier and on its way to you.',                  icon: 'local_shipping' },
+    { title: 'Delivered · Confirm Receipt',           subtitle: 'Your item has been delivered! Please inspect and confirm receipt.',     icon: 'home'           },
+    { title: 'Order Complete',                        subtitle: 'Funds have been released to the seller. Thank you for using Plumio.',   icon: 'check_circle'   },
+  ];
+  const stepCopy     = STEP_COPY[currentStep] ?? STEP_COPY[1];
+  const deliveryTitle    = isDelivery ? stepCopy.title    : (isCompleted ? 'Handoff Complete'            : 'Funds Locked · Escrow Active');
+  const deliverySubtitle = isDelivery ? stepCopy.subtitle : (isCompleted ? 'Handoff confirmed. Funds released to seller.' : 'Payment held securely — released after you scan the QR.');
 
   return (
     <div className="bg-gray-50 min-h-screen pb-[120px]" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -182,6 +281,20 @@ export default function EscrowStatusScreen() {
 
       <main className="pt-14 max-w-2xl mx-auto px-4 flex flex-col gap-4 py-5">
 
+        {/* ── Delivered toast ── */}
+        {showToast && (
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[60] w-[calc(100%-2rem)] max-w-sm bg-green-600 text-white rounded-2xl px-4 py-3 shadow-xl flex items-center gap-3 animate-bounce">
+            <span className="material-symbols-outlined text-[22px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>local_shipping</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold leading-tight">Your item has been delivered!</p>
+              <p className="text-xs text-green-100 mt-0.5">Please inspect and confirm receipt below.</p>
+            </div>
+            <button onClick={() => setShowToast(false)} className="text-green-200 hover:text-white shrink-0">
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </button>
+          </div>
+        )}
+
         {/* Error */}
         {error && (
           <div className="flex items-center gap-2 text-red-700 text-sm bg-red-50 border border-red-200 rounded-xl px-4 py-3">
@@ -196,7 +309,7 @@ export default function EscrowStatusScreen() {
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
                 <span className="material-symbols-outlined text-green-600 text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  {isCompleted ? 'check_circle' : hasTracking ? 'local_shipping' : 'inventory_2'}
+                  {stepCopy.icon}
                 </span>
               </div>
               <div>
@@ -209,40 +322,67 @@ export default function EscrowStatusScreen() {
               {['Paid', 'Packed', 'Shipped', 'Delivered', 'Done'].map((step, i) => (
                 <React.Fragment key={step}>
                   <div className="flex flex-col items-center gap-1 flex-1">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold border-2 transition-colors ${
-                      i <= progressStep
-                        ? 'bg-[#A855F7] border-[#A855F7] text-white'
-                        : 'bg-white border-gray-200 text-gray-400'
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold border-2 transition-all duration-500 ${
+                      i + 1 <= currentStep
+                        ? 'bg-purple-500 border-purple-500 text-white shadow-sm shadow-purple-200'
+                        : 'bg-white border-gray-300 text-gray-400'
                     }`}>{i + 1}</div>
-                    <span className="text-[9px] text-gray-400 text-center leading-tight">{step}</span>
+                    <span className={`text-[9px] text-center leading-tight transition-colors ${i + 1 <= currentStep ? 'text-purple-600 font-semibold' : 'text-gray-400'}`}>{step}</span>
                   </div>
                   {i < 4 && (
-                    <div className={`h-0.5 flex-1 mb-4 transition-colors ${i < progressStep ? 'bg-[#A855F7]' : 'bg-gray-200'}`} />
+                    <div className={`h-0.5 flex-1 mb-4 transition-all duration-500 ${i + 1 < currentStep ? 'bg-purple-500' : 'bg-gray-200'}`} />
                   )}
                 </React.Fragment>
               ))}
             </div>
           </div>
-        ) : (
-          <div className={`bg-white rounded-2xl p-5 shadow-sm border flex items-center gap-3 ${
-            isCompleted ? 'border-green-200' : 'border-purple-100'
-          }`}>
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-              isCompleted ? 'bg-green-100' : 'bg-purple-100'
-            }`}>
-              <span className={`material-symbols-outlined text-[22px] ${isCompleted ? 'text-green-600' : 'text-[#A855F7]'}`}
-                style={{ fontVariationSettings: "'FILL' 1" }}>
-                {isCompleted ? 'check_circle' : 'lock'}
-              </span>
+        ) : isCompleted ? (
+          /* Handoff complete */
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-green-200 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-green-600 text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
             </div>
             <div>
-              <p className="font-bold text-gray-900 text-sm">
-                {isCompleted ? 'Handoff Complete' : 'Funds Locked · Escrow Active'}
-              </p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {isCompleted
-                  ? 'Handoff confirmed. Funds released to seller.'
-                  : 'Payment held securely — released after you scan the QR.'}
+              <p className="font-bold text-gray-900 text-sm">Handoff Complete</p>
+              <p className="text-xs text-gray-500 mt-0.5">Handoff confirmed. Funds released to seller.</p>
+            </div>
+          </div>
+        ) : sellerArrived ? (
+          /* Seller has arrived — prompt buyer to scan */
+          <div className="bg-green-50 rounded-2xl p-5 shadow-sm border border-green-300 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-white text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>location_on</span>
+              </div>
+              <div>
+                <p className="font-bold text-green-900 text-sm">Your seller has arrived! 📍</p>
+                <p className="text-xs text-green-700 mt-0.5">Head to the meetup spot and scan the QR code to complete the handoff.</p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigate(`/handoff/confirm/${txId}`)}
+              className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-md shadow-green-200/60 animate-pulse"
+            >
+              <span className="material-symbols-outlined text-[20px]">qr_code_scanner</span>
+              Scan QR Code Now
+            </button>
+          </div>
+        ) : (
+          /* Waiting for seller to arrive */
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-purple-100 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-[#A855F7] text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>schedule</span>
+              </div>
+              <div>
+                <p className="font-bold text-gray-900 text-sm">Waiting for Seller to Arrive</p>
+                <p className="text-xs text-gray-500 mt-0.5">You'll receive a notification when the seller reaches the meetup spot.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 bg-purple-50 rounded-xl px-3 py-2.5">
+              <span className="material-symbols-outlined text-[#A855F7] text-[15px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>lock</span>
+              <p className="text-xs text-purple-700 leading-snug">
+                <span className="font-semibold">RM {Number(amount ?? 0).toFixed(2)}</span> locked safely in escrow until handoff is confirmed.
               </p>
             </div>
           </div>
@@ -379,7 +519,7 @@ export default function EscrowStatusScreen() {
         )}
 
         {/* ── Location Card ── */}
-        {meetupLoc ? (
+        {displayAddr ? (
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-start gap-3">
             <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center shrink-0 mt-0.5">
               <span className="material-symbols-outlined text-[#A855F7] text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -390,7 +530,7 @@ export default function EscrowStatusScreen() {
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
                 {isDelivery ? 'Delivery Address' : 'Meetup Location'}
               </p>
-              <p className="text-sm font-semibold text-gray-900 mt-1">{meetupLoc}</p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">{displayAddr}</p>
             </div>
           </div>
         ) : null}
@@ -416,6 +556,15 @@ export default function EscrowStatusScreen() {
             ))}
           </div>
         </div>
+
+        {/* ── Return to Home button (always visible for demo) ── */}
+        <button
+          onClick={() => navigate('/')}
+          className="w-full bg-[#A855F7] hover:bg-[#9333EA] text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-md shadow-purple-200/60 active:scale-[0.98] text-base"
+        >
+          <span className="material-symbols-outlined text-[20px]">home</span>
+          Return to Plumio Home
+        </button>
 
         {/* ── Escrow protection badge ── */}
         <div className="bg-green-50 border border-green-100 rounded-2xl p-4 flex items-start gap-3">
@@ -472,7 +621,18 @@ export default function EscrowStatusScreen() {
                 )}
               </button>
               <button
-                onClick={() => navigate('/report')}
+                onClick={() => navigate('/report', {
+                  state: {
+                    listingId:         tx?.listing?.id,
+                    sellerId:          tx?.seller_id,
+                    listingTitle:      tx?.listing?.title,
+                    sellerName:        tx?.seller?.full_name ?? null,
+                    listingImage:      tx?.listing?.image_url,
+                    fulfillmentMethod: isDelivery ? 'delivery' : 'handoff',
+                    amount:            tx?.amount,
+                    txId:              txId,
+                  }
+                })}
                 className="w-full border border-gray-200 text-gray-500 font-medium py-3 rounded-2xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm"
               >
                 <span className="material-symbols-outlined text-[18px]">report</span>
@@ -481,15 +641,40 @@ export default function EscrowStatusScreen() {
             </>
           ) : !isSeller ? (
             <>
+              {sellerArrived ? (
+                <button
+                  onClick={() => navigate(`/handoff/confirm/${txId}`)}
+                  className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-200/60 text-base active:scale-[0.98] animate-pulse"
+                >
+                  <span className="material-symbols-outlined text-[20px]">qr_code_scanner</span>
+                  Scan QR Code Now
+                </button>
+              ) : (
+                <button
+                  onClick={openSellerChat}
+                  disabled={chatLoading}
+                  className="w-full bg-[#A855F7] hover:bg-[#9333EA] disabled:bg-purple-300 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-200/60 text-base active:scale-[0.98]"
+                >
+                  {chatLoading
+                    ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>chat</span>
+                  }
+                  {chatLoading ? 'Opening Chat…' : 'Message Seller'}
+                </button>
+              )}
               <button
-                onClick={() => navigate(`/handoff/confirm/${txId}`)}
-                className="w-full bg-[#A855F7] hover:bg-[#9333EA] text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-200/60 text-base active:scale-[0.98]"
-              >
-                <span className="material-symbols-outlined text-[20px]">qr_code_scanner</span>
-                Scan Handoff QR
-              </button>
-              <button
-                onClick={() => navigate('/report')}
+                onClick={() => navigate('/report', {
+                  state: {
+                    listingId:         tx?.listing?.id,
+                    sellerId:          tx?.seller_id,
+                    listingTitle:      tx?.listing?.title,
+                    sellerName:        tx?.seller?.full_name ?? null,
+                    listingImage:      tx?.listing?.image_url,
+                    fulfillmentMethod: isDelivery ? 'delivery' : 'handoff',
+                    amount:            tx?.amount,
+                    txId:              txId,
+                  }
+                })}
                 className="w-full border border-gray-200 text-gray-500 font-medium py-3 rounded-2xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm"
               >
                 <span className="material-symbols-outlined text-[18px]">report</span>
@@ -498,7 +683,15 @@ export default function EscrowStatusScreen() {
             </>
           ) : (
             <button
-              onClick={() => navigate('/report')}
+              onClick={() => navigate('/report', {
+                state: {
+                  listingId:    tx?.listing?.id,
+                  sellerId:     tx?.seller_id,
+                  listingTitle: tx?.listing?.title,
+                  sellerName:   tx?.seller?.full_name ?? null,
+                  listingImage: tx?.listing?.image_url,
+                }
+              })}
               className="w-full border border-gray-200 text-gray-500 font-medium py-3 rounded-2xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm"
             >
               <span className="material-symbols-outlined text-[18px]">report</span>
@@ -507,6 +700,17 @@ export default function EscrowStatusScreen() {
           )}
         </div>
       </div>
+
+      {/* ── Review modal — fires immediately on Confirm Receipt ── */}
+      {showReviewModal && (
+        <OrderReceivedModal
+          itemName={tx?.listing?.title}
+          itemImage={tx?.listing?.image_url}
+          itemPrice={tx?.listing?.price ? `RM ${Number(tx.listing.price).toFixed(2)}` : undefined}
+          onClose={() => setShowReviewModal(false)}
+          onSubmit={handleReviewSubmit}
+        />
+      )}
     </div>
   );
 }

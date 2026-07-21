@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 import { supabase } from '../supabase';
 import NotificationBell from './NotificationBell';
 
@@ -8,6 +9,7 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
   const navigate = useNavigate();
   const { session } = useAuth();
   const userId = session?.user?.id;
+  const { cartCount } = useCart();
 
   const [unreadMessages, setUnreadMessages] = useState(0);
 
@@ -97,6 +99,22 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
             <div className="flex items-center gap-xs">
               <NotificationBell isDark={isDark} />
 
+              {/* Cart button */}
+              <div className="relative">
+                <button
+                  onClick={() => navigate('/cart')}
+                  className={`flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
+                  aria-label="Cart"
+                >
+                  <span className="material-symbols-outlined text-[22px]">shopping_cart</span>
+                </button>
+                {cartCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full h-4 w-4 flex items-center justify-center pointer-events-none leading-none">
+                    {cartCount > 9 ? '9+' : cartCount}
+                  </span>
+                )}
+              </div>
+
               {/* Messages button */}
               <div className="relative">
                 <button
@@ -106,11 +124,19 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
                 >
                   <span className="material-symbols-outlined text-[22px]">chat_bubble</span>
                 </button>
-                {/* Unread dot — only visible when there are unread messages */}
                 {unreadMessages > 0 && (
                   <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white pointer-events-none" />
                 )}
               </div>
+
+              {/* My Orders — quick access to active transactions + seller QR */}
+              <button
+                onClick={() => navigate('/transactions')}
+                className={`flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
+                aria-label="My Orders"
+              >
+                <span className="material-symbols-outlined text-[22px]">receipt_long</span>
+              </button>
 
               <button
                 onClick={() => navigate('/profile')}

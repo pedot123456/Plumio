@@ -157,7 +157,8 @@ export default function CreateListingScreen() {
         uploadedUrls.push(publicUrl);
       }
 
-      const image_url = uploadedUrls[0] ?? null; // first file = cover
+      const image_url  = uploadedUrls[0] ?? null; // first file = cover
+      const media_urls = uploadedUrls;            // all files — used by product gallery
 
       // Insert listing row
       const { error: insertError } = await supabase.from('listings').insert({
@@ -168,6 +169,7 @@ export default function CreateListingScreen() {
         category,
         condition:      condition || null,
         image_url,
+        media_urls,
         latitude:       latitude ?? null,
         longitude:      longitude ?? null,
         location_label: locationLabel || null,
@@ -195,7 +197,13 @@ export default function CreateListingScreen() {
           <span className="material-symbols-outlined">close</span>
         </button>
         <h1 className="font-headline-sm text-headline-sm text-primary font-bold tracking-tight">List an Item</h1>
-        <div className="w-10" />
+        <button
+          className="text-primary hover:bg-surface-container-high transition-colors active:scale-95 p-2 rounded-full flex items-center justify-center"
+          onClick={() => navigate('/')}
+          title="Go to Home"
+        >
+          <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>storefront</span>
+        </button>
       </header>
 
       <main className="pt-[80px] pb-[100px] max-w-2xl mx-auto w-full flex flex-col">
@@ -239,18 +247,30 @@ export default function CreateListingScreen() {
             </button>
           )}
 
-          {/* Thumbnail row */}
+          {/* Thumbnail grid */}
           {mediaItems.length > 0 && (
-            <div className="flex gap-2 flex-wrap">
+            <div className="grid grid-cols-3 gap-4">
               {mediaItems.map((item, i) => (
-                <div key={i} className="relative w-24 h-24 rounded-xl overflow-hidden shrink-0 bg-surface-container-high">
+                <div key={i} className="relative h-32 rounded-md overflow-hidden bg-gray-100">
                   {item.file.type.startsWith('video/') ? (
-                    <video
-                      src={item.preview}
-                      muted
-                      playsInline
-                      className="w-full h-full object-cover"
-                    />
+                    <>
+                      <video
+                        src={item.preview}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className="w-full h-full object-cover"
+                      />
+                      {/* Centered play overlay so the user knows it's a video */}
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/25 pointer-events-none">
+                        <span
+                          className="material-symbols-outlined text-white text-[34px] drop-shadow"
+                          style={{ fontVariationSettings: "'FILL' 1" }}
+                        >
+                          play_circle
+                        </span>
+                      </div>
+                    </>
                   ) : (
                     <img
                       src={item.preview}
@@ -259,17 +279,10 @@ export default function CreateListingScreen() {
                     />
                   )}
 
-                  {/* Cover badge */}
+                  {/* Cover badge — purple, first item only */}
                   {i === 0 && (
-                    <span className="absolute bottom-1 left-1 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded-full leading-none">
+                    <span className="absolute bottom-1 left-1 bg-purple-600 text-white text-[10px] font-semibold px-2 py-0.5 rounded-sm leading-none">
                       Cover
-                    </span>
-                  )}
-
-                  {/* Video badge */}
-                  {item.file.type.startsWith('video/') && (
-                    <span className="absolute top-1 left-1 bg-black/60 rounded-full p-0.5">
-                      <span className="material-symbols-outlined text-white text-[12px]">play_arrow</span>
                     </span>
                   )}
 
@@ -277,23 +290,23 @@ export default function CreateListingScreen() {
                   <button
                     type="button"
                     onClick={() => handleRemoveMedia(i)}
-                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center text-white hover:bg-red-500 transition-colors"
+                    className="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 active:bg-red-700 rounded-full flex items-center justify-center text-white transition-colors shadow"
                     aria-label="Remove"
                   >
-                    <span className="material-symbols-outlined text-[13px]">close</span>
+                    <span className="material-symbols-outlined text-[14px]">close</span>
                   </button>
                 </div>
               ))}
 
-              {/* Add more slot */}
+              {/* Add more slot — matches grid cell height */}
               {mediaItems.length < 5 && (
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-24 h-24 rounded-xl border-2 border-dashed border-tertiary/20 bg-surface-container-lowest flex flex-col items-center justify-center gap-1 hover:bg-surface-container-low transition-colors shrink-0"
+                  className="h-32 rounded-md border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center gap-1 hover:bg-gray-100 active:bg-gray-200 transition-colors"
                 >
-                  <span className="material-symbols-outlined text-secondary text-[22px]">add_photo_alternate</span>
-                  <span className="text-[10px] text-secondary font-medium">Add more</span>
+                  <span className="material-symbols-outlined text-purple-600 text-[28px]">add</span>
+                  <span className="text-[11px] text-gray-500 font-medium">Add more</span>
                 </button>
               )}
             </div>
