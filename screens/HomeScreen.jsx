@@ -7,6 +7,7 @@ import BottomNav from '../components/BottomNav';
 import ProductCard from '../components/ProductCard';
 import ChatWidget from '../components/ChatWidget';
 import Footer from '../components/Footer';
+import ScamAlertBanner from '../components/ScamAlertBanner';
 
 const PAGE_SIZE = 8;
 
@@ -107,6 +108,8 @@ export default function HomeScreen() {
             </button>
           </div>
         </section>
+
+        <ScamAlertBanner />
 
         {/* Categories */}
         <section>

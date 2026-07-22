@@ -1,6 +1,5 @@
 import React from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import Header from './Header';
 
 // Screens that own their entire UI, including any top navigation.
@@ -48,6 +47,7 @@ const ROUTE_TITLES = {
   '/support-chat': 'Chat with Plumio',
   '/terms':        'Terms of Service',
   '/privacy':      'Privacy Policy',
+  '/scam-awareness': 'Scam Awareness Center',
 };
 
 function getTitle(pathname) {
@@ -59,12 +59,6 @@ function getTitle(pathname) {
   if (pathname.startsWith('/chat/'))           return 'Negotiation';
   return 'Plumio';
 }
-
-const pageVariants = {
-  initial: { opacity: 0, y: 16 },
-  animate: { opacity: 1, y: 0 },
-  exit:    { opacity: 0, y: -8 },
-};
 
 export default function Layout() {
   const { pathname } = useLocation();
@@ -78,18 +72,7 @@ export default function Layout() {
         <Header back={true} title={getTitle(pathname)} />
       )}
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={pathname}
-          variants={pageVariants}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          transition={{ duration: 0.4, ease: 'easeInOut' }}
-        >
-          <Outlet />
-        </motion.div>
-      </AnimatePresence>
+      <Outlet />
 
     </div>
   );

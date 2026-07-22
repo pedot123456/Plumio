@@ -8,6 +8,7 @@ import DeliveryAddressModal  from '../components/DeliveryAddressModal';
 import MeetupLocationModal   from '../components/MeetupLocationModal';
 import FpxBankingModal       from '../components/FpxBankingModal';
 import DuitNowQrModal        from '../components/DuitNowQrModal';
+import ScamAlertBanner       from '../components/ScamAlertBanner';
 
 // ── Constants ──────────────────────────────────────────────────
 const SHIPPING_FEE = 5.00;
@@ -309,6 +310,8 @@ export default function SecureCartScreen() {
             <button onClick={() => setError('')}><span className="material-symbols-outlined text-[18px]">close</span></button>
           </div>
         )}
+
+        <ScamAlertBanner />
 
         {/* ── 1. Escrow Progress Tracker ─────────────────────────── */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">

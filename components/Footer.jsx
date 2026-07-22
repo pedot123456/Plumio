@@ -28,10 +28,11 @@ const COLUMNS = [
   {
     heading: 'Support',
     links: [
-      { label: 'Help Centre',    path: '/help' },
-      { label: 'Chat Support',   path: '/support-chat',  protected: true },
-      { label: 'Report an Issue', path: '/report',       protected: true },
-      { label: 'My Orders',      path: '/transactions',  protected: true },
+      { label: 'Help Centre',        path: '/help' },
+      { label: 'Scam Awareness Center', path: '/scam-awareness' },
+      { label: 'Chat Support',       path: '/support-chat',  protected: true },
+      { label: 'Report an Issue',    path: '/report',        protected: true },
+      { label: 'My Orders',          path: '/transactions',  protected: true },
     ],
   },
 ];

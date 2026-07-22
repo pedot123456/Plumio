@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import AppNavigator from './navigation/AppNavigator';
 import SplashScreen from './screens/SplashScreen';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Reads loading state from AuthContext — must live inside <AuthProvider>.
 // Enforces a 2-second minimum splash duration so fast auth sessions don't cause
@@ -18,7 +19,11 @@ function AppContent() {
   }, []);
 
   if (loading || !minTimeElapsed) return <SplashScreen />;
-  return <AppNavigator />;
+  return (
+    <ErrorBoundary>
+      <AppNavigator />
+    </ErrorBoundary>
+  );
 }
 
 export default function App() {

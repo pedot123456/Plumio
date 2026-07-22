@@ -27,6 +27,7 @@ import SettingsScreen        from '../screens/SettingsScreen';
 import RecentlyViewedScreen  from '../screens/RecentlyViewedScreen';
 import TermsPage             from '../screens/TermsPage';
 import PrivacyPage           from '../screens/PrivacyPage';
+import ScamAwarenessScreen   from '../screens/ScamAwarenessScreen';
 import HelpCenterPage       from '../screens/HelpCenterPage';
 import HelpCategoryPage     from '../screens/HelpCategoryPage';
 import ChatInboxPage        from '../screens/ChatInboxPage';
@@ -86,6 +87,7 @@ export default function AppNavigator() {
         <Route path="/support-chat"    element={<SupportChatScreen />} />
         <Route path="/terms"           element={<TermsPage />} />
         <Route path="/privacy"         element={<PrivacyPage />} />
+        <Route path="/scam-awareness"  element={<ScamAwarenessScreen />} />
       </Route>
     </Routes>
   );

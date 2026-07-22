@@ -8,6 +8,7 @@ import TopAppBar   from '../components/TopAppBar';
 import BottomNav from '../components/BottomNav';
 import GuestModal   from '../components/GuestModal';
 import LikeButton   from '../components/LikeButton';
+import ScamAlertBanner from '../components/ScamAlertBanner';
 
 // ── UI helper: star row ────────────────────────────────────────
 function Stars({ rating, size = 16 }) {
@@ -637,6 +638,8 @@ export default function ProductDetailsScreen() {
                 </div>
               )}
             </div>
+
+            <ScamAlertBanner />
 
             <hr className="border-t border-outline-variant opacity-30 hidden md:block" />
 
