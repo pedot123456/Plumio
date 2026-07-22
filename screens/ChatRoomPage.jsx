@@ -56,7 +56,7 @@
 */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Send, Package, ImagePlus, Loader2, ShoppingCart, Check, X } from 'lucide-react';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
@@ -456,9 +456,9 @@ export default function ChatRoomPage() {
             )}
           </div>
 
-          <a href="/" className="hover:opacity-75 transition-opacity shrink-0">
+          <Link to="/" className="hover:opacity-75 transition-opacity shrink-0">
             <img src="/Plumio.png" alt="Plumio" className="h-8 w-auto object-contain" />
-          </a>
+          </Link>
 
         </div>
       </header>

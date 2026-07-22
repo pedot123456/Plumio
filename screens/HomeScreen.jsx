@@ -6,6 +6,7 @@ import TopAppBar from '../components/TopAppBar';
 import BottomNav from '../components/BottomNav';
 import ProductCard from '../components/ProductCard';
 import ChatWidget from '../components/ChatWidget';
+import Footer from '../components/Footer';
 
 const PAGE_SIZE = 8;
 
@@ -194,6 +195,8 @@ export default function HomeScreen() {
           )}
         </section>
       </main>
+
+      <Footer />
 
       <BottomNav activeTab="Home" />
       <ChatWidget />

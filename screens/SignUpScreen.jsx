@@ -114,7 +114,14 @@ export default function SignUpScreen() {
     const { data, error } = await supabase.auth.signUp({
       email:    email.trim().toLowerCase(),
       password,
-      options:  { data: { full_name: fullName.trim() } },
+      options:  {
+        data:         { full_name: fullName.trim() },
+        // Without this, Supabase falls back to the dashboard's static "Site URL",
+        // which sends the confirmation email link to whatever that's set to
+        // (often still localhost from local dev) instead of wherever this signup
+        // actually happened — same fix already applied to OAuth/password-reset below.
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
     });
 
     if (!error && data.user) {
