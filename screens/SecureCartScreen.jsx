@@ -58,7 +58,7 @@ export default function SecureCartScreen() {
   const [isLoading,       setIsLoading]       = useState(true);
   const [error,           setError]           = useState('');
   const [fulfillment,      setFulfillment]      = useState('handoff'); // 'handoff' | 'delivery'
-  const [meetupDetails,    setMeetupDetails]    = useState(null);      // { landmark, stateArea, details }
+  const [meetupDetails,    setMeetupDetails]    = useState(null);      // { landmark, state, city, district, postcode, details }
   const [deliveryAddress,  setDeliveryAddress]  = useState('');
   const [paymentMethod,    setPaymentMethod]    = useState('duitnow');
   const [paying,           setPaying]           = useState(false);
@@ -85,7 +85,7 @@ export default function SecureCartScreen() {
       const formatted = [
         a.fullName, a.phone,
         a.unitNo ? `${a.unitNo}, ${a.streetAddress}` : a.streetAddress,
-        a.postalCode, a.stateArea,
+        a.postalCode, a.city, a.district, a.state,
       ].filter(Boolean).join(', ');
       setDeliveryAddress(formatted);
     }
@@ -108,7 +108,8 @@ export default function SecureCartScreen() {
         id, quantity, offer_price,
         listing:listings (
           id, title, price, image_url,
-          location_label, user_id, seller_id
+          location_label, user_id, seller_id,
+          allows_handoff, allows_delivery
         )
       `)
       .eq('user_id', session.user.id)
@@ -121,9 +122,27 @@ export default function SecureCartScreen() {
     setIsLoading(false);
   }
 
+  // A method is offered for the whole cart only if every item's seller allows it.
+  // Missing values (older rows written before this column existed) default to allowed.
+  const cartAllowsHandoff  = cartItems.every(i => i.listing?.allows_handoff  !== false);
+  const cartAllowsDelivery = cartItems.every(i => i.listing?.allows_delivery !== false);
+  const noCompatibleMethod = cartItems.length > 0 && !cartAllowsHandoff && !cartAllowsDelivery;
+
+  // Keep the selected method valid as the cart changes (e.g. an item is removed)
+  useEffect(() => {
+    if (cartAllowsHandoff && fulfillment !== 'handoff' && !cartAllowsDelivery) {
+      setFulfillment('handoff');
+    } else if (cartAllowsDelivery && fulfillment !== 'delivery' && !cartAllowsHandoff) {
+      setFulfillment('delivery');
+    }
+  }, [cartAllowsHandoff, cartAllowsDelivery]);
+
   // Build the meetup location string sent to the RPC and displayed in EscrowStatusScreen
   const meetupLocationStr = meetupDetails
-    ? [meetupDetails.landmark, meetupDetails.stateArea].filter(Boolean).join(' · ')
+    ? [
+        meetupDetails.landmark,
+        [meetupDetails.city, meetupDetails.district, meetupDetails.state].filter(Boolean).join(', '),
+      ].filter(Boolean).join(' · ')
     : '';
 
   // Use negotiated offer_price when set, otherwise fall back to listing's original price
@@ -137,6 +156,18 @@ export default function SecureCartScreen() {
     if (!session || cartItems.length === 0) return;
 
     // ── Validation ──────────────────────────────────────────────
+    if (noCompatibleMethod) {
+      setError('Your cart has items with no common fulfillment method — check out those items separately.');
+      return;
+    }
+    if (fulfillment === 'handoff'  && !cartAllowsHandoff)  {
+      setError('Handoff isn’t offered for one or more items in your cart.');
+      return;
+    }
+    if (fulfillment === 'delivery' && !cartAllowsDelivery) {
+      setError('Delivery isn’t offered for one or more items in your cart.');
+      return;
+    }
     if (fulfillment === 'delivery' && !deliveryAddress.trim()) {
       setError('Please choose a delivery address before proceeding.');
       return;
@@ -359,34 +390,50 @@ export default function SecureCartScreen() {
         {/* ── 3. Fulfillment Toggle ──────────────────────────────── */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-4">Fulfillment Method</p>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { id: 'handoff',  icon: 'handshake',     label: 'Handoff',  sub: 'Meet in person · No shipping fee' },
-              { id: 'delivery', icon: 'local_shipping', label: 'Delivery', sub: `Ship to address · +RM ${SHIPPING_FEE.toFixed(2)}` },
-            ].map(opt => (
-              <button
-                key={opt.id}
-                onClick={() => setFulfillment(opt.id)}
-                className={`flex flex-col items-start gap-1.5 rounded-xl border-2 p-4 text-left transition-all ${
-                  fulfillment === opt.id
-                    ? 'border-[#A855F7] bg-purple-50'
-                    : 'border-gray-200 bg-white hover:border-purple-200'
-                }`}
-              >
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
-                  fulfillment === opt.id ? 'bg-[#A855F7] text-white' : 'bg-gray-100 text-gray-400'
-                }`}>
-                  <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>{opt.icon}</span>
-                </div>
-                <span className={`font-semibold text-sm ${fulfillment === opt.id ? 'text-[#7C3AED]' : 'text-gray-700'}`}>{opt.label}</span>
-                <span className="text-xs text-gray-400 leading-snug">{opt.sub}</span>
-                {fulfillment === opt.id && (
-                  <span className="material-symbols-outlined text-[#A855F7] text-[16px] self-end" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-                )}
-              </button>
-            ))}
-          </div>
 
+          {noCompatibleMethod ? (
+            <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5">
+              <span className="material-symbols-outlined text-red-500 text-[18px] shrink-0 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>error</span>
+              <p className="text-xs text-red-600 leading-relaxed">
+                <span className="font-semibold">No common fulfillment method.</span> Your cart has items whose sellers don't share a common option (e.g. one is handoff-only, another is delivery-only). Check those items out separately.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { id: 'handoff',  icon: 'handshake',      label: 'Handoff',  sub: 'Meet in person · No shipping fee',                 available: cartAllowsHandoff },
+                { id: 'delivery', icon: 'local_shipping', label: 'Delivery', sub: `Ship to address · +RM ${SHIPPING_FEE.toFixed(2)}`, available: cartAllowsDelivery },
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  disabled={!opt.available}
+                  onClick={() => setFulfillment(opt.id)}
+                  className={`flex flex-col items-start gap-1.5 rounded-xl border-2 p-4 text-left transition-all ${
+                    !opt.available
+                      ? 'border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed'
+                      : fulfillment === opt.id
+                        ? 'border-[#A855F7] bg-purple-50'
+                        : 'border-gray-200 bg-white hover:border-purple-200'
+                  }`}
+                >
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                    opt.available && fulfillment === opt.id ? 'bg-[#A855F7] text-white' : 'bg-gray-100 text-gray-400'
+                  }`}>
+                    <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>{opt.icon}</span>
+                  </div>
+                  <span className={`font-semibold text-sm ${opt.available && fulfillment === opt.id ? 'text-[#7C3AED]' : 'text-gray-700'}`}>{opt.label}</span>
+                  <span className="text-xs text-gray-400 leading-snug">
+                    {opt.available ? opt.sub : 'Not offered for items in your cart'}
+                  </span>
+                  {opt.available && fulfillment === opt.id && (
+                    <span className="material-symbols-outlined text-[#A855F7] text-[16px] self-end" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!noCompatibleMethod && (
           <div className="mt-4">
             {fulfillment === 'handoff' ? (
               <div className="flex flex-col gap-1.5">
@@ -430,6 +477,7 @@ export default function SecureCartScreen() {
               </div>
             )}
           </div>
+          )}
         </section>
 
         {/* ── 4. Transaction Summary ─────────────────────────────── */}
@@ -529,7 +577,7 @@ export default function SecureCartScreen() {
                 setError('');
                 handlePay();
               }}
-              disabled={paying || isLoading || cartItems.length === 0}
+              disabled={paying || isLoading || cartItems.length === 0 || noCompatibleMethod}
               className="w-full bg-[#A855F7] hover:bg-[#9333EA] disabled:bg-purple-300 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-200/60 disabled:cursor-not-allowed text-base active:scale-[0.98]"
             >
               {paying ? (
@@ -558,7 +606,7 @@ export default function SecureCartScreen() {
                   setShowFpxModal(true);
                 }
               }}
-              disabled={paying || isLoading || cartItems.length === 0}
+              disabled={paying || isLoading || cartItems.length === 0 || noCompatibleMethod}
               className="w-full bg-[#A855F7] hover:bg-[#9333EA] disabled:bg-purple-300 text-white font-bold py-4 rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-200/60 disabled:cursor-not-allowed text-base active:scale-[0.98]"
             >
               {paying ? (

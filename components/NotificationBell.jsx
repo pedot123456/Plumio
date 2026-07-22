@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+
+const PANEL_WIDTH = 360;
+const VIEWPORT_MARGIN = 8; // keeps the panel off the very edge of the screen
 
 const TYPE_CONFIG = {
   new_message:        { icon: 'chat',           bg: 'bg-blue-100',   color: 'text-blue-600'   },
@@ -68,8 +72,34 @@ export default function NotificationBell({ isDark = false }) {
   const [open,          setOpen]          = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [loading,       setLoading]       = useState(false);
+  const [panelPos,      setPanelPos]      = useState(null); // { top, left } in viewport coordinates
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  // ── Position the panel from the bell's live viewport position ──────
+  // Rendered via a portal (see below) so it always lands in true viewport
+  // coordinates — anchoring it to the bell's own small wrapper instead
+  // (plain `absolute right-0`) broke on mobile, where the bell isn't the
+  // rightmost header icon, pushing the 360px panel off the left edge.
+  useEffect(() => {
+    if (!open || !bellRef.current) return;
+
+    function reposition() {
+      const rect = bellRef.current.getBoundingClientRect();
+      const width = Math.min(PANEL_WIDTH, window.innerWidth - VIEWPORT_MARGIN * 2);
+      const left  = Math.min(
+        Math.max(VIEWPORT_MARGIN, rect.right - width),
+        window.innerWidth - width - VIEWPORT_MARGIN,
+      );
+      const top       = rect.bottom + 8;
+      const maxHeight = window.innerHeight - top - VIEWPORT_MARGIN;
+      setPanelPos({ top, left, width, maxHeight });
+    }
+
+    reposition();
+    window.addEventListener('resize', reposition);
+    return () => window.removeEventListener('resize', reposition);
+  }, [open]);
 
   // ── Fetch ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -165,14 +195,27 @@ export default function NotificationBell({ isDark = false }) {
       </button>
 
       {/* ── Dropdown panel ── */}
-      {open && (
+      {/* Portaled to <body> and positioned with viewport coordinates (not
+          `absolute` inside this component) so it can never be clipped or
+          pushed off-screen by where the bell sits in the header, and so it
+          escapes any ancestor with an active CSS transform (e.g. the page's
+          Framer Motion transition wrapper), which would otherwise turn a
+          `position: fixed` child into one relative to that ancestor instead
+          of the viewport. */}
+      {open && panelPos && createPortal(
         <div
           ref={panelRef}
-          className="absolute right-0 top-12 w-[360px] max-w-[calc(100vw-1rem)] bg-white rounded-2xl shadow-2xl border border-gray-100 z-[100] overflow-hidden"
-          style={{ fontFamily: "'Inter', sans-serif" }}
+          className="fixed bg-white rounded-2xl shadow-2xl border border-gray-100 z-[100] overflow-hidden flex flex-col"
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            top:       panelPos.top,
+            left:      panelPos.left,
+            width:     panelPos.width,
+            maxHeight: panelPos.maxHeight,
+          }}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-[18px] text-[#A855F7]" style={{ fontVariationSettings: "'FILL' 1" }}>notifications</span>
               <h3 className="font-bold text-gray-900 text-sm">Notifications</h3>
@@ -191,7 +234,7 @@ export default function NotificationBell({ isDark = false }) {
           </div>
 
           {/* List */}
-          <div className="overflow-y-auto max-h-[400px]">
+          <div className="overflow-y-auto flex-1 min-h-0">
             {loading ? (
               <div className="flex flex-col gap-3 p-4">
                 {[0,1,2].map(i => (
@@ -256,7 +299,7 @@ export default function NotificationBell({ isDark = false }) {
 
           {/* Footer */}
           {notifications.length > 0 && (
-            <div className="border-t border-gray-100 px-4 py-2.5 text-center">
+            <div className="border-t border-gray-100 px-4 py-2.5 text-center shrink-0">
               <button
                 onClick={() => { setNotifications([]); markAllRead(); }}
                 className="text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
@@ -265,7 +308,8 @@ export default function NotificationBell({ isDark = false }) {
               </button>
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

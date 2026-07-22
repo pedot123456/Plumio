@@ -1,22 +1,37 @@
 import React, { useState } from 'react';
 
-const MALAYSIAN_STATES = [
-  '',
-  'Johor, Johor Bahru, Johor Bahru',
-  'Kedah, Kota Setar, Alor Setar',
-  'Kelantan, Kota Bharu, Kota Bharu',
-  'Melaka, Melaka Tengah, Melaka',
-  'Negeri Sembilan, Seremban, Seremban',
-  'Pahang, Kuantan, Kuantan',
-  'Perak, Perak Tengah, Bota, Seri Iskandar',
-  'Pulau Pinang, Timur Laut, Georgetown',
-  'Sabah, Kota Kinabalu, Kota Kinabalu',
-  'Sarawak, Kuching, Kuching',
-  'Selangor, Petaling, Subang Jaya',
-  'Terengganu, Kuala Terengganu, Kuala Terengganu',
-  'W.P. Kuala Lumpur, Kuala Lumpur',
-  'W.P. Putrajaya, Putrajaya',
+const MY_STATES = [
+  'Johor', 'Kedah', 'Kelantan', 'Melaka', 'Negeri Sembilan',
+  'Pahang', 'Perak', 'Perlis', 'Pulau Pinang', 'Sabah', 'Sarawak',
+  'Selangor', 'Terengganu',
+  'W.P. Kuala Lumpur', 'W.P. Labuan', 'W.P. Putrajaya',
 ];
+
+// Nominatim returns raw names like "Wilayah Persekutuan Kuala Lumpur" or "Penang" —
+// map those back to the canonical labels used in our State dropdown.
+function normalizeState(raw) {
+  if (!raw) return '';
+  const cleaned = raw.replace(/^Wilayah Persekutuan\s*/i, '').trim();
+  const alias   = { Penang: 'Pulau Pinang' }[cleaned] || cleaned;
+  const target  = ['Kuala Lumpur', 'Labuan', 'Putrajaya'].includes(alias) ? `W.P. ${alias}` : alias;
+  return MY_STATES.find(s => s.toLowerCase() === target.toLowerCase()) || '';
+}
+
+// Reverse-geocode coordinates into a real State / City / District / Postcode via OpenStreetMap Nominatim
+async function reverseGeocode(lat, lon) {
+  const res  = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`,
+    { headers: { 'Accept-Language': 'en' } }
+  );
+  const json = await res.json();
+  const addr = json.address || {};
+  return {
+    state:    normalizeState(addr.state),
+    city:     addr.city || addr.town || addr.village || addr.municipality || '',
+    district: addr.suburb || addr.city_district || addr.county || addr.state_district || '',
+    postcode: addr.postcode || '',
+  };
+}
 
 // Floating-label input wrapper — keeps the overlapping label look
 function FloatingInput({ label, children }) {
@@ -47,7 +62,9 @@ function CloseButton({ onClick }) {
 const emptyForm = {
   fullName:      '',
   phone:         '',
-  stateArea:     '',
+  state:         '',
+  city:          '',
+  district:      '',
   postalCode:    '',
   unitNo:        '',
   streetAddress: '',
@@ -64,7 +81,9 @@ export default function DeliveryAddressModal({ onClose, onSelect, onSaveDefault 
   // ── Form fields ──────────────────────────────────────────────
   const [fullName,        setFullName]        = useState('');
   const [phone,           setPhone]           = useState('');
-  const [stateArea,       setStateArea]       = useState('');
+  const [state,           setState]           = useState('');
+  const [city,            setCity]            = useState('');
+  const [district,        setDistrict]        = useState('');
   const [postalCode,      setPostalCode]      = useState('');
   const [unitNo,          setUnitNo]          = useState('');
   const [streetAddress,   setStreetAddress]   = useState('');
@@ -73,19 +92,23 @@ export default function DeliveryAddressModal({ onClose, onSelect, onSaveDefault 
   const [locationSearch,  setLocationSearch]  = useState('');
   const [detecting,       setDetecting]       = useState(false);
   const [isSaving,        setIsSaving]        = useState(false);
+  const [detectError,     setDetectError]     = useState('');
 
   // ── Helpers ──────────────────────────────────────────────────
   function openNewForm() {
     setEditIndex(null);
     setFullName('');
     setPhone('');
-    setStateArea('');
+    setState('');
+    setCity('');
+    setDistrict('');
     setPostalCode('');
     setUnitNo('');
     setStreetAddress('');
     setAddressLabel('Home');
     setIsDefault(savedAddresses.length === 0);
     setLocationSearch('');
+    setDetectError('');
     setView('form');
   }
 
@@ -94,32 +117,51 @@ export default function DeliveryAddressModal({ onClose, onSelect, onSaveDefault 
     setEditIndex(idx);
     setFullName(a.fullName);
     setPhone(a.phone);
-    setStateArea(a.stateArea);
+    setState(a.state);
+    setCity(a.city);
+    setDistrict(a.district);
     setPostalCode(a.postalCode);
     setUnitNo(a.unitNo);
     setStreetAddress(a.streetAddress);
     setAddressLabel(a.addressLabel);
     setIsDefault(a.isDefault);
     setLocationSearch('');
+    setDetectError('');
     setView('form');
   }
 
   function handleDetectLocation() {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setDetectError('Your browser does not support location detection.');
+      return;
+    }
     setDetecting(true);
+    setDetectError('');
     navigator.geolocation.getCurrentPosition(
-      position => {
-        // Placeholder: in production replace with reverse-geocoding API
-        const { latitude, longitude } = position.coords;
-        setStreetAddress(`Near ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+      async ({ coords }) => {
+        try {
+          const result = await reverseGeocode(coords.latitude, coords.longitude);
+          if (result.state)    setState(result.state);
+          if (result.city)     setCity(result.city);
+          if (result.district) setDistrict(result.district);
+          if (result.postcode) setPostalCode(result.postcode);
+          if (!result.state && !result.city) {
+            setDetectError('Could not match your location to a state/city — please fill them in manually.');
+          }
+        } catch {
+          setDetectError('Could not detect your address. Please fill in State/City manually.');
+        }
         setDetecting(false);
       },
-      () => setDetecting(false),
+      () => {
+        setDetectError('Location access denied. Please allow location in your browser settings.');
+        setDetecting(false);
+      },
     );
   }
 
   async function handleSubmit() {
-    const entry = { fullName, phone, stateArea, postalCode, unitNo, streetAddress, addressLabel, isDefault };
+    const entry = { fullName, phone, state, city, district, postalCode, unitNo, streetAddress, addressLabel, isDefault };
 
     if (isDefault && onSaveDefault) {
       setIsSaving(true);
@@ -129,7 +171,7 @@ export default function DeliveryAddressModal({ onClose, onSelect, onSaveDefault 
       const formatted = [
         entry.fullName, entry.phone,
         entry.unitNo ? `${entry.unitNo}, ${entry.streetAddress}` : entry.streetAddress,
-        entry.postalCode, entry.stateArea,
+        entry.postalCode, entry.city, entry.district, entry.state,
       ].filter(Boolean).join(', ');
       onSelect?.(formatted);
       onClose?.();
@@ -153,7 +195,9 @@ export default function DeliveryAddressModal({ onClose, onSelect, onSaveDefault 
       a.phone,
       a.unitNo ? `${a.unitNo}, ${a.streetAddress}` : a.streetAddress,
       a.postalCode,
-      a.stateArea,
+      a.city,
+      a.district,
+      a.state,
     ].filter(Boolean).join(', ');
     onSelect?.(formatted);
     onClose?.();
@@ -242,7 +286,7 @@ export default function DeliveryAddressModal({ onClose, onSelect, onSaveDefault 
                             )}
                           </div>
                           <p className="text-sm text-gray-500 leading-snug">
-                            {[a.unitNo, a.streetAddress, a.postalCode, a.stateArea].filter(Boolean).join(', ')}
+                            {[a.unitNo, a.streetAddress, a.postalCode, a.city, a.district, a.state].filter(Boolean).join(', ')}
                           </p>
                           <div className="flex items-center gap-2 mt-1.5">
                             <span className="text-[11px] text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
@@ -328,36 +372,58 @@ export default function DeliveryAddressModal({ onClose, onSelect, onSaveDefault 
                 </FloatingInput>
               </div>
 
-              {/* Row 2 — State / Area */}
-              <FloatingInput label="State, Area">
-                <select
-                  value={stateArea}
-                  onChange={e => setStateArea(e.target.value)}
-                  className="w-full px-3 pt-3 pb-2 text-sm bg-transparent focus:outline-none appearance-none rounded-sm text-gray-900"
-                >
-                  <option value="" disabled>Select your state and area</option>
-                  {MALAYSIAN_STATES.filter(Boolean).map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                  </svg>
-                </span>
-              </FloatingInput>
+              {/* Row 2 — State / City */}
+              <div className="grid grid-cols-2 gap-4">
+                <FloatingInput label="State">
+                  <select
+                    value={state}
+                    onChange={e => setState(e.target.value)}
+                    className="w-full px-3 pt-3 pb-2 text-sm bg-transparent focus:outline-none appearance-none rounded-sm text-gray-900"
+                  >
+                    <option value="" disabled>Select state</option>
+                    {MY_STATES.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                    </svg>
+                  </span>
+                </FloatingInput>
+                <FloatingInput label="City">
+                  <input
+                    type="text"
+                    value={city}
+                    onChange={e => setCity(e.target.value)}
+                    placeholder="e.g. Putrajaya"
+                    className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none rounded-sm"
+                  />
+                </FloatingInput>
+              </div>
 
-              {/* Row 3 — Postal Code */}
-              <FloatingInput label="Postal Code">
-                <input
-                  type="text"
-                  value={postalCode}
-                  onChange={e => setPostalCode(e.target.value.replace(/\D/g, ''))}
-                  placeholder="e.g. 32610"
-                  maxLength={5}
-                  className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none rounded-sm"
-                />
-              </FloatingInput>
+              {/* Row 3 — District / Postal Code */}
+              <div className="grid grid-cols-2 gap-4">
+                <FloatingInput label="District (Optional)">
+                  <input
+                    type="text"
+                    value={district}
+                    onChange={e => setDistrict(e.target.value)}
+                    placeholder="e.g. Presint 8"
+                    className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none rounded-sm"
+                  />
+                </FloatingInput>
+                <FloatingInput label="Postal Code">
+                  <input
+                    type="text"
+                    value={postalCode}
+                    onChange={e => setPostalCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="e.g. 32610"
+                    maxLength={5}
+                    className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none rounded-sm"
+                  />
+                </FloatingInput>
+              </div>
 
               {/* Row 4 — Unit No */}
               <FloatingInput label="Unit No (Optional)">
@@ -414,6 +480,15 @@ export default function DeliveryAddressModal({ onClose, onSelect, onSaveDefault 
                   )}
                   {detecting ? 'Detecting location…' : 'Auto-Detect My Location'}
                 </button>
+                <p className="text-[11px] text-gray-400 text-center -mt-1">
+                  Click Auto-Detect to fill State / City / District / Postal Code above, or enter them manually.
+                </p>
+                {detectError && (
+                  <p className="text-xs text-red-500 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px] shrink-0">error_outline</span>
+                    {detectError}
+                  </p>
+                )}
 
                 {/* Static map placeholder */}
                 <div className="relative w-full h-32 bg-gray-100 rounded-sm overflow-hidden flex flex-col items-center justify-center gap-1">

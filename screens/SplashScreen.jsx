@@ -22,7 +22,7 @@ export default function SplashScreen() {
           Plumio
         </h1>
         <p className="text-purple-300 text-base font-medium tracking-wide">
-          Nak beli selamat, nak jual cepat?
+          Purple Picks, Better Deals
         </p>
       </div>
 

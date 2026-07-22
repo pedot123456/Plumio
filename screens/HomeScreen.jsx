@@ -9,12 +9,17 @@ import ChatWidget from '../components/ChatWidget';
 
 const PAGE_SIZE = 8;
 
-// Static UI taxonomy — not DB-driven
+// Static UI taxonomy — not DB-driven. Kept in sync with the category values
+// sellers can pick in CreateListingScreen and with BrowseCategoriesScreen's CATEGORY_META.
 const CATEGORIES = [
-  { icon: 'devices',   label: 'Electronics' },
-  { icon: 'checkroom', label: 'Fashion' },
-  { icon: 'chair',     label: 'Home & Living' },
-  { icon: 'diamond',   label: 'Collectibles' },
+  { key: 'electronics',  icon: 'devices',     label: 'Electronics' },
+  { key: 'fashion',      icon: 'checkroom',   label: 'Fashion' },
+  { key: 'food',         icon: 'restaurant',  label: 'Food & Beverages' },
+  { key: 'kraftangan',   icon: 'palette',     label: 'Kraftangan & Handicraft' },
+  { key: 'beauty',       icon: 'spa',         label: 'Beauty & Personal Care' },
+  { key: 'agriculture',  icon: 'agriculture', label: 'Agriculture & Fresh Produce' },
+  { key: 'home',         icon: 'chair',       label: 'Home & Furniture' },
+  { key: 'collectibles', icon: 'diamond',     label: 'Collectibles' },
 ];
 
 function ProductSkeleton() {
@@ -116,9 +121,9 @@ export default function HomeScreen() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
             {CATEGORIES.map(cat => (
               <div
-                key={cat.label}
+                key={cat.key}
                 className="bg-surface-container-lowest rounded-xl p-md level-1-shadow flex flex-col justify-between h-[120px] hover:level-2-shadow transition-shadow group cursor-pointer border border-outline-variant/30"
-                onClick={() => goIfAuth('/categories')}
+                onClick={() => goIfAuth(`/categories?tab=${cat.key}`)}
               >
                 <span className="material-symbols-outlined text-secondary text-3xl mb-auto group-hover:scale-110 transition-transform">
                   {cat.icon}

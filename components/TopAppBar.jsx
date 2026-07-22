@@ -41,7 +41,9 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
   if (variant === 'home' || variant === 'brand') {
     const isDark = variant === 'home';
 
-    const bg        = isDark ? 'bg-primary-container' : 'bg-surface shadow-sm';
+    // Dark variant uses a deep violet matched to the logo's own purple hue
+    // (bg-primary-container is more navy/blue and clashed with the logo's pale-lavender chip)
+    const bg        = isDark ? 'bg-[#2d1943]' : 'bg-surface shadow-sm';
     const brand     = isDark ? 'text-on-primary' : 'text-primary';
     const linkBase  = isDark
       ? 'text-on-primary/80 hover:text-on-primary hover:bg-white/10'
@@ -61,15 +63,10 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
 
           {/* Brand */}
           <button
-            className="flex items-center gap-xs shrink-0 active:opacity-80 transition-opacity"
+            className="flex items-center gap-sm shrink-0 active:opacity-80 transition-opacity"
             onClick={() => navigate('/')}
           >
-            <span
-              className={`material-symbols-outlined ${brand} text-[22px]`}
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              storefront
-            </span>
+            <img src="/Plumio.png" alt="Plumio" className="h-9 md:h-10 w-auto object-contain rounded-md" />
             <span className={`font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg font-black ${brand} leading-none`}>
               Plumio
             </span>

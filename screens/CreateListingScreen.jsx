@@ -6,6 +6,10 @@ import { useAuth } from '../context/AuthContext';
 const CATEGORIES = [
   { value: 'electronics', label: 'Electronics & Gadgets' },
   { value: 'fashion',     label: 'Fashion & Apparel' },
+  { value: 'food',        label: 'Food & Beverages' },
+  { value: 'kraftangan',  label: 'Kraftangan & Handicraft' },
+  { value: 'beauty',      label: 'Beauty & Personal Care' },
+  { value: 'agriculture', label: 'Agriculture & Fresh Produce' },
   { value: 'home',        label: 'Home & Furniture' },
   { value: 'collectibles',label: 'Collectibles & Art' },
 ];
@@ -16,11 +20,6 @@ const CONDITIONS = [
   { value: 'good',      label: 'Good' },
   { value: 'fair',      label: 'Fair' },
 ];
-
-const DELIVERY_HINTS = {
-  local:   'Buyer will meet you at a mutually agreed location.',
-  courier: 'You will need to pack and ship the item to the buyer.',
-};
 
 const MY_STATES = [
   'Johor', 'Kedah', 'Kelantan', 'Melaka', 'Negeri Sembilan',
@@ -40,7 +39,8 @@ export default function CreateListingScreen() {
   const [price, setPrice]           = useState('');
   const [category, setCategory]     = useState('');
   const [condition, setCondition]   = useState('');
-  const [delivery, setDelivery]     = useState('local');
+  const [allowsHandoff,  setAllowsHandoff]  = useState(true);
+  const [allowsDelivery, setAllowsDelivery] = useState(true);
   const [state,    setState]        = useState('');
   const [acceptTrades, setAcceptTrades] = useState(false);
 
@@ -137,6 +137,9 @@ export default function CreateListingScreen() {
     if (mediaItems.length > 5) {
       return setError('You can only upload a maximum of 5 files.');
     }
+    if (!allowsHandoff && !allowsDelivery) {
+      return setError('Please enable at least one fulfillment method — Handoff, Delivery, or both.');
+    }
     if (!session) return navigate('/login');
 
     setIsSubmitting(true);
@@ -168,6 +171,8 @@ export default function CreateListingScreen() {
         price:          Number(price),
         category,
         condition:      condition || null,
+        allows_handoff:  allowsHandoff,
+        allows_delivery: allowsDelivery,
         image_url,
         media_urls,
         latitude:       latitude ?? null,
@@ -469,38 +474,68 @@ export default function CreateListingScreen() {
             </div>
           </div>
 
-          {/* Delivery Method */}
-          <div className="flex flex-col gap-sm pt-sm">
+          {/* Fulfillment Methods — seller can offer either or both; buyer picks at checkout */}
+          <div className="flex flex-col gap-md pt-sm">
             <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80">
-              Delivery Method
+              Fulfillment Methods *
             </label>
-            <div className="flex bg-surface-container-high rounded-lg p-1 relative">
-              <div
-                className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] bg-surface-container-lowest rounded shadow-level-1 transition-all duration-300 ease-out"
-                style={{ transform: delivery === 'courier' ? 'translateX(100%)' : 'translateX(0)' }}
-              />
+
+            {/* Handoff toggle */}
+            <div className="flex items-start justify-between gap-md">
+              <div className="flex flex-col gap-xs flex-1">
+                <span className="font-label-md text-label-md text-primary-container">Face-to-Face Handoff</span>
+                <span className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                  Buyer will meet you at a mutually agreed location.
+                </span>
+              </div>
               <button
                 type="button"
-                onClick={() => setDelivery('local')}
-                className={`flex-1 py-sm rounded font-label-md text-label-md text-center transition-colors duration-200 z-10 relative ${
-                  delivery === 'local' ? 'text-primary-container' : 'text-on-surface-variant'
+                role="switch"
+                aria-checked={allowsHandoff}
+                onClick={() => setAllowsHandoff(v => !v)}
+                className={`relative inline-flex items-center h-7 w-[52px] rounded-full shrink-0 mt-xs transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary focus-visible:ring-offset-2 ${
+                  allowsHandoff ? 'bg-secondary' : 'bg-surface-container-high border border-outline-variant'
                 }`}
               >
-                Face-to-Face Local Handoff
-              </button>
-              <button
-                type="button"
-                onClick={() => setDelivery('courier')}
-                className={`flex-1 py-sm rounded font-label-md text-label-md text-center transition-colors duration-200 z-10 relative ${
-                  delivery === 'courier' ? 'text-primary-container' : 'text-on-surface-variant'
-                }`}
-              >
-                Courier Delivery
+                <span
+                  className={`inline-block w-5 h-5 rounded-full shadow-sm transition-transform duration-300 ${
+                    allowsHandoff ? 'bg-surface translate-x-[28px]' : 'bg-outline translate-x-[4px]'
+                  }`}
+                />
               </button>
             </div>
-            <p className="font-body-sm text-body-sm text-tertiary/60 mt-xs min-h-[20px] transition-opacity">
-              {DELIVERY_HINTS[delivery]}
-            </p>
+
+            {/* Delivery toggle */}
+            <div className="flex items-start justify-between gap-md">
+              <div className="flex flex-col gap-xs flex-1">
+                <span className="font-label-md text-label-md text-primary-container">Courier Delivery</span>
+                <span className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+                  You will need to pack and ship the item to the buyer.
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={allowsDelivery}
+                onClick={() => setAllowsDelivery(v => !v)}
+                className={`relative inline-flex items-center h-7 w-[52px] rounded-full shrink-0 mt-xs transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary focus-visible:ring-offset-2 ${
+                  allowsDelivery ? 'bg-secondary' : 'bg-surface-container-high border border-outline-variant'
+                }`}
+              >
+                <span
+                  className={`inline-block w-5 h-5 rounded-full shadow-sm transition-transform duration-300 ${
+                    allowsDelivery ? 'bg-surface translate-x-[28px]' : 'bg-outline translate-x-[4px]'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {!allowsHandoff && !allowsDelivery && (
+              <p className="font-body-sm text-body-sm text-error flex items-center gap-xs">
+                <span className="material-symbols-outlined text-[16px]">error_outline</span>
+                Enable at least one method so buyers can check out.
+              </p>
+            )}
           </div>
 
           {/* Pickup Location */}

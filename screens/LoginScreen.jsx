@@ -135,7 +135,7 @@ export default function LoginScreen() {
 
           <p className="text-gray-300 text-base leading-relaxed mb-10">
             Plumio –{' '}
-            <span className="text-purple-300 font-semibold">Purple Picks, Better Deals.</span>
+            <span className="text-purple-300 font-semibold">Purple Picks, Better Deals</span>
           </p>
 
           {/* Stats grid — first cell is live from the database */}
@@ -167,7 +167,7 @@ export default function LoginScreen() {
             <img src="/Plumio.png" alt="Plumio" className="h-28 mb-3 object-contain drop-shadow-md" />
             <span className="text-gray-800 font-black text-3xl tracking-tight">Plumio</span>
             <p className="text-gray-400 text-sm mt-1 text-center">
-              Purple Picks, Better Deals.
+              Purple Picks, Better Deals
             </p>
           </div>
 

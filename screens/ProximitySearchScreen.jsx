@@ -4,14 +4,18 @@ import { supabase } from '../supabase';
 import ProductCard from '../components/ProductCard';
 
 const DISTANCE_FILTERS = ['< 1km', '< 5km', '< 10km'];
-const CATEGORY_FILTERS = ['Electronics', 'Fashion', 'Textbooks', 'Dorm & Living'];
+const CATEGORY_FILTERS = ['Electronics', 'Fashion', 'Food & Beverages', 'Kraftangan', 'Beauty', 'Agriculture', 'Home & Furniture', 'Collectibles'];
 const ALL_FILTERS      = [...DISTANCE_FILTERS, ...CATEGORY_FILTERS];
 
 const CATEGORY_MAP = {
-  Electronics:    'electronics',
-  Fashion:        'fashion',
-  Textbooks:      'textbooks',
-  'Dorm & Living':'dorm',
+  Electronics:         'electronics',
+  Fashion:             'fashion',
+  'Food & Beverages':  'food',
+  Kraftangan:          'kraftangan',
+  Beauty:              'beauty',
+  Agriculture:         'agriculture',
+  'Home & Furniture':  'home',
+  Collectibles:        'collectibles',
 };
 
 const RADIUS_MAP = { '< 1km': 1, '< 5km': 5, '< 10km': 10 };

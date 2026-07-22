@@ -1,19 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import TopAppBar from '../components/TopAppBar';
 import BottomNav from '../components/BottomNav';
 import CategoryRow from '../components/CategoryRow';
 
-// Order determines row order on screen
+// Order determines row order on screen — kept in sync with the category values
+// sellers can actually pick in CreateListingScreen.
 const CATEGORY_META = [
-  { key: 'electronics',  label: 'Electronics',       icon: 'devices'       },
-  { key: 'fashion',      label: 'Preloved Fashion',  icon: 'styler'        },
-  { key: 'textbooks',    label: 'Textbooks & Notes', icon: 'menu_book'     },
-  { key: 'dorm',         label: 'Dorm & Living',     icon: 'chair'         },
-  { key: 'collectibles', label: 'Collectibles',      icon: 'auto_awesome'  },
-  { key: 'services',     label: 'Micro-Services',    icon: 'handshake'     },
+  { key: 'electronics',  label: 'Electronics',                 icon: 'devices'      },
+  { key: 'fashion',      label: 'Fashion',                      icon: 'checkroom'    },
+  { key: 'food',         label: 'Food & Beverages',             icon: 'restaurant'   },
+  { key: 'kraftangan',   label: 'Kraftangan & Handicraft',      icon: 'palette'      },
+  { key: 'beauty',       label: 'Beauty & Personal Care',       icon: 'spa'          },
+  { key: 'agriculture',  label: 'Agriculture & Fresh Produce',  icon: 'agriculture'  },
+  { key: 'home',         label: 'Home & Furniture',             icon: 'chair'        },
+  { key: 'collectibles', label: 'Collectibles',                 icon: 'diamond'      },
 ];
 
 // ── Skeleton placeholder while loading ─────────────────────────
@@ -55,11 +58,16 @@ function EmptyCategory({ label }) {
 
 // ── Main screen ─────────────────────────────────────────────────
 export default function BrowseCategoriesScreen() {
-  const navigate       = useNavigate();
-  const { session }    = useAuth();
+  const navigate         = useNavigate();
+  const { session }      = useAuth();
+  const [searchParams]   = useSearchParams();
   const [grouped,   setGrouped]   = useState({});
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('all');
+  // Deep-link support — e.g. Home page tiles link to /categories?tab=food
+  const requestedTab = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(
+    CATEGORY_META.some(c => c.key === requestedTab) ? requestedTab : 'all'
+  );
 
   useEffect(() => { fetchListings(); }, []);
 
@@ -106,7 +114,7 @@ export default function BrowseCategoriesScreen() {
             Browse Categories
           </h1>
           <p className="text-gray-400 text-xs mt-0.5">
-            Find what you need from UTP students
+            Discover products from local entrepreneurs and sellers nationwide
           </p>
         </div>
 

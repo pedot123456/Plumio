@@ -1,21 +1,37 @@
 import React, { useState } from 'react';
 
-const MALAYSIAN_STATES = [
-  'Johor, Johor Bahru, Johor Bahru',
-  'Kedah, Kota Setar, Alor Setar',
-  'Kelantan, Kota Bharu, Kota Bharu',
-  'Melaka, Melaka Tengah, Melaka',
-  'Negeri Sembilan, Seremban, Seremban',
-  'Pahang, Kuantan, Kuantan',
-  'Perak, Perak Tengah, Bota, Seri Iskandar',
-  'Pulau Pinang, Timur Laut, Georgetown',
-  'Sabah, Kota Kinabalu, Kota Kinabalu',
-  'Sarawak, Kuching, Kuching',
-  'Selangor, Petaling, Subang Jaya',
-  'Terengganu, Kuala Terengganu, Kuala Terengganu',
-  'W.P. Kuala Lumpur, Kuala Lumpur',
-  'W.P. Putrajaya, Putrajaya',
+const MY_STATES = [
+  'Johor', 'Kedah', 'Kelantan', 'Melaka', 'Negeri Sembilan',
+  'Pahang', 'Perak', 'Perlis', 'Pulau Pinang', 'Sabah', 'Sarawak',
+  'Selangor', 'Terengganu',
+  'W.P. Kuala Lumpur', 'W.P. Labuan', 'W.P. Putrajaya',
 ];
+
+// Nominatim returns raw names like "Wilayah Persekutuan Kuala Lumpur" or "Penang" —
+// map those back to the canonical labels used in our State dropdown.
+function normalizeState(raw) {
+  if (!raw) return '';
+  const cleaned = raw.replace(/^Wilayah Persekutuan\s*/i, '').trim();
+  const alias   = { Penang: 'Pulau Pinang' }[cleaned] || cleaned;
+  const target  = ['Kuala Lumpur', 'Labuan', 'Putrajaya'].includes(alias) ? `W.P. ${alias}` : alias;
+  return MY_STATES.find(s => s.toLowerCase() === target.toLowerCase()) || '';
+}
+
+// Reverse-geocode coordinates into a real State / City / District / Postcode via OpenStreetMap Nominatim
+async function reverseGeocode(lat, lon) {
+  const res  = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`,
+    { headers: { 'Accept-Language': 'en' } }
+  );
+  const json = await res.json();
+  const addr = json.address || {};
+  return {
+    state:    normalizeState(addr.state),
+    city:     addr.city || addr.town || addr.village || addr.municipality || '',
+    district: addr.suburb || addr.city_district || addr.county || addr.state_district || '',
+    postcode: addr.postcode || '',
+  };
+}
 
 function FloatingInput({ label, children }) {
   return (
@@ -43,28 +59,61 @@ function CloseButton({ onClick }) {
 
 export default function MeetupLocationModal({ onClose, onSelect }) {
   const [landmark,  setLandmark]  = useState('');
-  const [stateArea, setStateArea] = useState('');
+  const [state,     setState]     = useState('');
+  const [city,      setCity]      = useState('');
+  const [district,  setDistrict]  = useState('');
+  const [postcode,  setPostcode]  = useState('');
   const [details,   setDetails]   = useState('');
   const [detecting, setDetecting] = useState(false);
   const [formError, setFormError] = useState('');
 
+  function clearFormError() {
+    if (formError) setFormError('');
+  }
+
   function handleDetectLocation() {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setFormError('Your browser does not support location detection.');
+      return;
+    }
     setDetecting(true);
+    setFormError('');
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => {
-        setLandmark(`Near ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`);
+      async ({ coords }) => {
+        try {
+          const result = await reverseGeocode(coords.latitude, coords.longitude);
+          if (result.state)    setState(result.state);
+          if (result.city)     setCity(result.city);
+          if (result.district) setDistrict(result.district);
+          if (result.postcode) setPostcode(result.postcode);
+          if (!result.state && !result.city) {
+            setFormError('Could not match your location to a state/city — please fill them in manually.');
+          }
+        } catch {
+          setFormError('Could not detect your address. Please fill in State/City manually.');
+        }
         setDetecting(false);
       },
-      () => setDetecting(false),
+      () => {
+        setFormError('Location access denied. Please allow location in your browser settings.');
+        setDetecting(false);
+      },
     );
   }
 
   function handleSubmit() {
     if (!landmark.trim()) { setFormError('Please enter a location name or landmark.'); return; }
-    if (!stateArea)       { setFormError('Please select a state and area.'); return; }
+    if (!state)           { setFormError('Please select a state.'); return; }
+    if (!city.trim())     { setFormError('Please enter a city.'); return; }
     setFormError('');
-    onSelect?.({ landmark: landmark.trim(), stateArea, details: details.trim() });
+    onSelect?.({
+      landmark: landmark.trim(),
+      state,
+      city:     city.trim(),
+      district: district.trim(),
+      postcode: postcode.trim(),
+      details:  details.trim(),
+    });
     onClose?.();
   }
 
@@ -99,43 +148,13 @@ export default function MeetupLocationModal({ onClose, onSelect }) {
             <input
               type="text"
               value={landmark}
-              onChange={e => { setLandmark(e.target.value); if (formError) setFormError(''); }}
+              onChange={e => { setLandmark(e.target.value); clearFormError(); }}
               placeholder="e.g. Mall Entrance, LRT Station, Block Lobby"
               className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none rounded-sm"
             />
           </FloatingInput>
 
-          {/* State, City, Area */}
-          <FloatingInput label="State, City, Area *">
-            <select
-              value={stateArea}
-              onChange={e => { setStateArea(e.target.value); if (formError) setFormError(''); }}
-              className="w-full px-3 pt-3 pb-2 text-sm bg-transparent focus:outline-none appearance-none rounded-sm text-gray-900"
-            >
-              <option value="" disabled>Select your state and area</option>
-              {MALAYSIAN_STATES.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-              </svg>
-            </span>
-          </FloatingInput>
-
-          {/* Specific Meetup Details */}
-          <FloatingInput label="Specific Meetup Details (Optional)">
-            <textarea
-              value={details}
-              onChange={e => setDetails(e.target.value)}
-              placeholder="e.g. Wait near the north entrance ticketing counter, I'll be wearing a blue cap"
-              rows={3}
-              className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none resize-none rounded-sm"
-            />
-          </FloatingInput>
-
-          {/* Auto-detect + map placeholder */}
+          {/* Auto-detect — tell the user this can prefill the boxes below */}
           <div className="flex flex-col gap-2">
             <button
               type="button"
@@ -149,14 +168,82 @@ export default function MeetupLocationModal({ onClose, onSelect }) {
               }
               {detecting ? 'Detecting location…' : 'Auto-Detect My Location'}
             </button>
+            <p className="text-[11px] text-gray-400 text-center">
+              Click Auto-Detect to fill State / City / District / Postcode below, or enter them manually.
+            </p>
+          </div>
 
-            <div className="relative w-full h-32 bg-gray-100 rounded-sm overflow-hidden flex flex-col items-center justify-center gap-1">
-              <svg viewBox="0 0 24 24" fill="none" className="w-9 h-9 drop-shadow-sm">
-                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#9333ea" opacity="0.18" />
-                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z" fill="#9333ea" />
-              </svg>
-              <p className="text-xs text-gray-400">Map preview · location will appear here</p>
-            </div>
+          {/* State / City */}
+          <div className="grid grid-cols-2 gap-4">
+            <FloatingInput label="State *">
+              <select
+                value={state}
+                onChange={e => { setState(e.target.value); clearFormError(); }}
+                className="w-full px-3 pt-3 pb-2 text-sm bg-transparent focus:outline-none appearance-none rounded-sm text-gray-900"
+              >
+                <option value="" disabled>Select state</option>
+                {MY_STATES.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                  <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                </svg>
+              </span>
+            </FloatingInput>
+            <FloatingInput label="City *">
+              <input
+                type="text"
+                value={city}
+                onChange={e => { setCity(e.target.value); clearFormError(); }}
+                placeholder="e.g. Putrajaya"
+                className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none rounded-sm"
+              />
+            </FloatingInput>
+          </div>
+
+          {/* District / Postcode */}
+          <div className="grid grid-cols-2 gap-4">
+            <FloatingInput label="District (Optional)">
+              <input
+                type="text"
+                value={district}
+                onChange={e => setDistrict(e.target.value)}
+                placeholder="e.g. Presint 8"
+                className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none rounded-sm"
+              />
+            </FloatingInput>
+            <FloatingInput label="Postcode (Optional)">
+              <input
+                type="text"
+                value={postcode}
+                onChange={e => setPostcode(e.target.value.replace(/\D/g, ''))}
+                placeholder="e.g. 32102"
+                maxLength={5}
+                className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none rounded-sm"
+              />
+            </FloatingInput>
+          </div>
+
+          {/* Specific Meetup Details */}
+          <FloatingInput label="Specific Meetup Details (Optional)">
+            <textarea
+              value={details}
+              onChange={e => setDetails(e.target.value)}
+              placeholder="e.g. Wait near the north entrance ticketing counter, I'll be wearing a blue cap"
+              rows={3}
+              className="w-full px-3 pt-3 pb-2 text-sm text-gray-900 placeholder:text-gray-300 bg-transparent focus:outline-none resize-none rounded-sm"
+            />
+          </FloatingInput>
+
+          {/* Map placeholder */}
+          <div className="relative w-full h-32 bg-gray-100 rounded-sm overflow-hidden flex flex-col items-center justify-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" className="w-9 h-9 drop-shadow-sm">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#9333ea" opacity="0.18" />
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z" fill="#9333ea" />
+            </svg>
+            <p className="text-xs text-gray-400">Map preview · location will appear here</p>
           </div>
         </div>
 
