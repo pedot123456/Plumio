@@ -503,30 +503,6 @@ export default function CreateListingScreen() {
             </div>
           </div>
 
-          {/* State / Location */}
-          <div className="flex flex-col gap-xs">
-            <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="item-state">
-              State
-            </label>
-            <div className="relative">
-              <select
-                id="item-state"
-                value={state}
-                onChange={e => setState(e.target.value)}
-                className="w-full appearance-none bg-surface-container-lowest border border-tertiary/20 rounded-lg pl-md pr-xl py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent shadow-level-1 transition-all duration-200 cursor-pointer"
-              >
-                <option value="">Select your state</option>
-                {MY_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <span className="material-symbols-outlined absolute right-md top-1/2 -translate-y-1/2 text-primary-container/50 pointer-events-none">
-                expand_more
-              </span>
-            </div>
-            <p className="font-body-sm text-body-sm text-on-surface-variant/60">
-              Buyers nationwide can filter listings by state.
-            </p>
-          </div>
-
           {/* Condition */}
           <div className="flex flex-col gap-xs">
             <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="item-condition">
@@ -671,7 +647,7 @@ export default function CreateListingScreen() {
               )}
             </div>
             <p className="font-body-sm text-body-sm text-on-surface-variant/60 -mt-xs">
-              Auto-Detect fills City / District / Postcode / State below — you can still edit any of them, the final details are always up to you.
+              Auto-Detect fills State / City / District / Postcode below — you can still edit any of them, the final details are always up to you.
             </p>
 
             {locationError && (
@@ -682,6 +658,25 @@ export default function CreateListingScreen() {
             )}
 
             <div className="grid grid-cols-2 gap-sm">
+              <div className="flex flex-col gap-xs">
+                <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="pickup-state">
+                  State
+                </label>
+                <div className="relative">
+                  <select
+                    id="pickup-state"
+                    value={state}
+                    onChange={e => setState(e.target.value)}
+                    className="w-full appearance-none bg-surface-container-lowest border border-tertiary/20 rounded-lg pl-md pr-xl py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent shadow-level-1 transition-all duration-200 cursor-pointer"
+                  >
+                    <option value="">Select state</option>
+                    {MY_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <span className="material-symbols-outlined absolute right-sm top-1/2 -translate-y-1/2 text-primary-container/50 pointer-events-none text-[18px]">
+                    expand_more
+                  </span>
+                </div>
+              </div>
               <div className="flex flex-col gap-xs">
                 <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="pickup-city">
                   City
@@ -695,6 +690,9 @@ export default function CreateListingScreen() {
                   className="w-full bg-surface-container-lowest border border-tertiary/20 rounded-lg px-md py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent placeholder:text-outline shadow-level-1 transition-all duration-200"
                 />
               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-sm">
               <div className="flex flex-col gap-xs">
                 <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="pickup-district">
                   District (Optional)
@@ -708,25 +706,24 @@ export default function CreateListingScreen() {
                   className="w-full bg-surface-container-lowest border border-tertiary/20 rounded-lg px-md py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent placeholder:text-outline shadow-level-1 transition-all duration-200"
                 />
               </div>
-            </div>
-
-            <div className="flex flex-col gap-xs">
-              <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="pickup-postcode">
-                Postcode (Optional)
-              </label>
-              <input
-                id="pickup-postcode"
-                type="text"
-                value={postcode}
-                onChange={e => setPostcode(e.target.value.replace(/\D/g, ''))}
-                placeholder="e.g. 62502"
-                maxLength={5}
-                className="w-full bg-surface-container-lowest border border-tertiary/20 rounded-lg px-md py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent placeholder:text-outline shadow-level-1 transition-all duration-200"
-              />
+              <div className="flex flex-col gap-xs">
+                <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="pickup-postcode">
+                  Postcode (Optional)
+                </label>
+                <input
+                  id="pickup-postcode"
+                  type="text"
+                  value={postcode}
+                  onChange={e => setPostcode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="e.g. 62502"
+                  maxLength={5}
+                  className="w-full bg-surface-container-lowest border border-tertiary/20 rounded-lg px-md py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent placeholder:text-outline shadow-level-1 transition-all duration-200"
+                />
+              </div>
             </div>
 
             <p className="font-body-sm text-body-sm text-on-surface-variant/60">
-              Buyers will see approximately how far this item is from them.
+              Buyers nationwide can filter listings by state, and will see approximately how far this item is from them.
             </p>
           </div>
 
