@@ -10,6 +10,45 @@ import ScamAlertBanner from '../components/ScamAlertBanner';
 
 const PAGE_SIZE = 8;
 
+const HERO_SLIDES = ['/LocalMarket.jpg', '/LocalMarket1.jpg', '/Secure4.jpg', '/SecureMarket3.jpg'];
+const HERO_SLIDE_INTERVAL_MS = 5000;
+
+function HeroSlideshow() {
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const timer = setInterval(() => {
+      setActiveIndex(i => (i + 1) % HERO_SLIDES.length);
+    }, HERO_SLIDE_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <>
+      {HERO_SLIDES.map((src, i) => (
+        <div
+          key={src}
+          className="absolute inset-0 bg-cover bg-center opacity-80 z-0 transition-opacity duration-1000 ease-in-out"
+          style={{ backgroundImage: `url('${src}')`, opacity: i === activeIndex ? 0.8 : 0 }}
+        />
+      ))}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-1.5">
+        {HERO_SLIDES.map((src, i) => (
+          <button
+            key={src}
+            onClick={() => setActiveIndex(i)}
+            aria-label={`Show slide ${i + 1}`}
+            className={`h-1.5 rounded-full transition-all duration-300 ${
+              i === activeIndex ? 'w-5 bg-on-primary' : 'w-1.5 bg-on-primary/50 hover:bg-on-primary/75'
+            }`}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
 // Static UI taxonomy — not DB-driven. Kept in sync with the category values
 // sellers can pick in CreateListingScreen and with BrowseCategoriesScreen's CATEGORY_META.
 const CATEGORIES = [
@@ -87,10 +126,7 @@ export default function HomeScreen() {
       <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-lg flex flex-col gap-lg">
         {/* Hero */}
         <section className="w-full rounded-xl overflow-hidden relative level-1-shadow bg-surface-container-lowest flex items-center min-h-[200px] md:min-h-[300px]">
-          <div
-            className="absolute inset-0 bg-cover bg-center opacity-80 z-0"
-            style={{ backgroundImage: "url('https://lh3.googleusercontent.com/aida-public/AB6AXuCIe7DZXHXcv2iL1qTh2blM1g5M-MFDcXTez0rCTB-WZKPt8PWt0xlgi0fQfPR8wnoB02agXIAkTKZxyFqoyJfNdEYBzI6-o-b8vd4Dx5oeX4aFumimc5YIMP8gVpVkGHDEPNOFk-CfI5xgFK0jMBpk-F70b6oBzEfEXv6uwozphZxc64hgzLRqozgHTZd02YcjBnP6FOpBD_sR40Bu8HhpNRlRAsVedLeSCeNA2WOkspl-J16f7IKs6t8TlxX2ISZWYGHOEDgXiL4')" }}
-          />
+          <HeroSlideshow />
           <div className="absolute inset-0 bg-gradient-to-r from-primary-container/90 to-transparent z-10" />
           <div className="relative z-20 p-lg md:p-xxl max-w-[80%] md:max-w-md">
             <span className="inline-block px-sm py-xs bg-secondary-container text-on-secondary-container rounded-md font-label-sm text-label-sm mb-sm font-bold uppercase tracking-wider">
