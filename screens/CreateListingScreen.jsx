@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+import { MY_STATES, reverseGeocode } from '../utils/malaysiaLocation';
 
 const isVideoUrl = (url = '') => /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url || '');
 
@@ -21,13 +22,6 @@ const CONDITIONS = [
   { value: 'like_new',  label: 'Like New' },
   { value: 'good',      label: 'Good' },
   { value: 'fair',      label: 'Fair' },
-];
-
-const MY_STATES = [
-  'Johor', 'Kedah', 'Kelantan', 'Melaka', 'Negeri Sembilan',
-  'Pahang', 'Perak', 'Perlis', 'Pulau Pinang', 'Sabah', 'Sarawak',
-  'Selangor', 'Terengganu',
-  'W.P. Kuala Lumpur', 'W.P. Labuan', 'W.P. Putrajaya',
 ];
 
 export default function CreateListingScreen() {
@@ -54,10 +48,14 @@ export default function CreateListingScreen() {
   const [mediaItems, setMediaItems] = useState([]);
   const [mediaError, setMediaError] = useState('');
 
-  // Location state
+  // Location state — GPS pin (optional, precise) plus editable structured
+  // fields. Auto-Detect just pre-fills city/district/postcode/state; the
+  // seller can still type or change any of them afterward.
   const [latitude, setLatitude]           = useState(null);
   const [longitude, setLongitude]         = useState(null);
-  const [locationLabel, setLocationLabel] = useState('');
+  const [city,     setCity]     = useState('');
+  const [district, setDistrict] = useState('');
+  const [postcode, setPostcode] = useState('');
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationError, setLocationError] = useState('');
 
@@ -104,7 +102,9 @@ export default function CreateListingScreen() {
       setAcceptTrades(Boolean(data.accepts_trade));
       setLatitude(data.latitude ?? null);
       setLongitude(data.longitude ?? null);
-      setLocationLabel(data.location_label ?? '');
+      setCity(data.pickup_city ?? '');
+      setDistrict(data.pickup_district ?? '');
+      setPostcode(data.pickup_postcode ?? '');
 
       const existingUrls = Array.isArray(data.media_urls) && data.media_urls.length > 0
         ? data.media_urls
@@ -142,6 +142,9 @@ export default function CreateListingScreen() {
     setMediaError('');
   };
 
+  // Auto-Detect just pre-fills City/District/Postcode (and State, above) from
+  // the device's GPS — it never overrides anything the seller already typed,
+  // and every field stays freely editable afterward either way.
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
       setLocationError('Your browser does not support location.');
@@ -156,15 +159,16 @@ export default function CreateListingScreen() {
         setLatitude(lat);
         setLongitude(lng);
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-            { headers: { 'Accept-Language': 'en' } }
-          );
-          const json = await res.json();
-          const parts = json.display_name?.split(',') ?? [];
-          setLocationLabel(parts.slice(0, 3).join(',').trim() || `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+          const result = await reverseGeocode(lat, lng);
+          if (result.state)    setState(result.state);
+          if (result.city)     setCity(result.city);
+          if (result.district) setDistrict(result.district);
+          if (result.postcode) setPostcode(result.postcode);
+          if (!result.state && !result.city) {
+            setLocationError('Could not match your location to a state/city — please fill them in manually.');
+          }
         } catch {
-          setLocationLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+          setLocationError('Could not detect your address. Please fill in the fields manually.');
         }
         setLocationLoading(false);
       },
@@ -175,11 +179,11 @@ export default function CreateListingScreen() {
     );
   };
 
-  const handleClearLocation = () => {
+  // Clears just the captured GPS pin — the typed City/District/Postcode/State
+  // text is left alone, since those are now normal editable fields the seller owns.
+  const handleClearGpsPin = () => {
     setLatitude(null);
     setLongitude(null);
-    setLocationLabel('');
-    setLocationError('');
   };
 
   const handlePublish = async () => {
@@ -224,6 +228,11 @@ export default function CreateListingScreen() {
 
       const image_url = media_urls[0] ?? null; // first file = cover
 
+      // location_label is a derived display string kept for screens that just
+      // show plain text (e.g. Proximity Search) — the structured fields below
+      // are the source of truth and what re-populates the form on edit.
+      const location_label = [city.trim(), district.trim(), state].filter(Boolean).join(', ') || null;
+
       const listingPayload = {
         title:          title.trim(),
         description:    description.trim() || null,
@@ -234,9 +243,12 @@ export default function CreateListingScreen() {
         allows_delivery: allowsDelivery,
         image_url,
         media_urls,
-        latitude:       latitude ?? null,
-        longitude:      longitude ?? null,
-        location_label: locationLabel || null,
+        latitude:         latitude ?? null,
+        longitude:        longitude ?? null,
+        location_label,
+        pickup_city:      city.trim() || null,
+        pickup_district:  district.trim() || null,
+        pickup_postcode:  postcode.trim() || null,
         state:          state || null,
         accepts_trade:  acceptTrades,
       };
@@ -628,43 +640,39 @@ export default function CreateListingScreen() {
               Pickup Location
             </label>
 
-            {latitude ? (
-              <div className="flex items-start gap-sm bg-secondary/5 border border-secondary/20 rounded-xl px-md py-sm">
-                <span className="material-symbols-outlined text-secondary text-[20px] shrink-0 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>location_on</span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-label-md text-label-md text-primary-container truncate">{locationLabel}</p>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
-                    {latitude.toFixed(5)}, {longitude.toFixed(5)}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleClearLocation}
-                  className="text-error hover:bg-error/10 p-1 rounded-full transition-colors shrink-0"
-                >
-                  <span className="material-symbols-outlined text-[18px]">close</span>
-                </button>
-              </div>
-            ) : (
+            <div className="flex items-center gap-sm">
               <button
                 type="button"
                 onClick={handleGetLocation}
                 disabled={locationLoading}
-                className="flex items-center justify-center gap-sm border-2 border-dashed border-tertiary/20 rounded-xl py-md text-secondary hover:bg-secondary/5 transition-colors disabled:opacity-60"
+                className="flex-1 flex items-center justify-center gap-sm border-2 border-dashed border-tertiary/20 rounded-xl py-sm text-secondary hover:bg-secondary/5 transition-colors disabled:opacity-60"
               >
                 {locationLoading ? (
                   <>
                     <span className="w-4 h-4 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
-                    Getting location…
+                    Detecting…
                   </>
                 ) : (
                   <>
                     <span className="material-symbols-outlined text-[20px]">my_location</span>
-                    <span className="font-label-md text-label-md">Use My Current Location</span>
+                    <span className="font-label-md text-label-md">Auto-Detect My Location</span>
                   </>
                 )}
               </button>
-            )}
+              {latitude != null && (
+                <button
+                  type="button"
+                  onClick={handleClearGpsPin}
+                  title="Clear GPS pin — keeps your typed fields"
+                  className="text-error hover:bg-error/10 p-2 rounded-full transition-colors shrink-0"
+                >
+                  <span className="material-symbols-outlined text-[20px]">location_off</span>
+                </button>
+              )}
+            </div>
+            <p className="font-body-sm text-body-sm text-on-surface-variant/60 -mt-xs">
+              Auto-Detect fills City / District / Postcode / State below — you can still edit any of them, the final details are always up to you.
+            </p>
 
             {locationError && (
               <p className="font-body-sm text-body-sm text-error flex items-center gap-xs">
@@ -672,6 +680,51 @@ export default function CreateListingScreen() {
                 {locationError}
               </p>
             )}
+
+            <div className="grid grid-cols-2 gap-sm">
+              <div className="flex flex-col gap-xs">
+                <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="pickup-city">
+                  City
+                </label>
+                <input
+                  id="pickup-city"
+                  type="text"
+                  value={city}
+                  onChange={e => setCity(e.target.value)}
+                  placeholder="e.g. Putrajaya"
+                  className="w-full bg-surface-container-lowest border border-tertiary/20 rounded-lg px-md py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent placeholder:text-outline shadow-level-1 transition-all duration-200"
+                />
+              </div>
+              <div className="flex flex-col gap-xs">
+                <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="pickup-district">
+                  District (Optional)
+                </label>
+                <input
+                  id="pickup-district"
+                  type="text"
+                  value={district}
+                  onChange={e => setDistrict(e.target.value)}
+                  placeholder="e.g. Presint 8"
+                  className="w-full bg-surface-container-lowest border border-tertiary/20 rounded-lg px-md py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent placeholder:text-outline shadow-level-1 transition-all duration-200"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-xs">
+              <label className="font-label-md text-label-md text-primary-container uppercase tracking-wider text-[11px] opacity-80" htmlFor="pickup-postcode">
+                Postcode (Optional)
+              </label>
+              <input
+                id="pickup-postcode"
+                type="text"
+                value={postcode}
+                onChange={e => setPostcode(e.target.value.replace(/\D/g, ''))}
+                placeholder="e.g. 62502"
+                maxLength={5}
+                className="w-full bg-surface-container-lowest border border-tertiary/20 rounded-lg px-md py-sm font-body-md text-body-md text-primary-container focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent placeholder:text-outline shadow-level-1 transition-all duration-200"
+              />
+            </div>
+
             <p className="font-body-sm text-body-sm text-on-surface-variant/60">
               Buyers will see approximately how far this item is from them.
             </p>

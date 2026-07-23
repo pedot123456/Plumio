@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { supabase } from '../supabase';
 import NotificationBell from './NotificationBell';
+
+const MORE_MENU_WIDTH = 200;
 
 export default function TopAppBar({ variant = 'default', title, trailing }) {
   const navigate = useNavigate();
@@ -12,6 +15,35 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
   const { cartCount } = useCart();
 
   const [unreadMessages, setUnreadMessages] = useState(0);
+
+  // Mobile-only "more" menu — collapses Cart/Messages/Orders/Account behind a
+  // single button so the row can never overflow no matter how many actions
+  // exist, instead of picking individual icons to hide at each breakpoint.
+  const [showMore, setShowMore] = useState(false);
+  const [morePos,  setMorePos]  = useState(null);
+  const moreBtnRef   = useRef(null);
+  const morePanelRef = useRef(null);
+
+  useEffect(() => {
+    function handler(e) {
+      if (
+        moreBtnRef.current   && !moreBtnRef.current.contains(e.target) &&
+        morePanelRef.current && !morePanelRef.current.contains(e.target)
+      ) {
+        setShowMore(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  function toggleMore(e) {
+    if (showMore) { setShowMore(false); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const left = Math.min(Math.max(8, rect.right - MORE_MENU_WIDTH), window.innerWidth - MORE_MENU_WIDTH - 8);
+    setMorePos({ top: rect.bottom + 8, left });
+    setShowMore(true);
+  }
 
   useEffect(() => {
     if (!userId) { setUnreadMessages(0); return; }
@@ -96,8 +128,9 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
             <div className="flex items-center gap-xs">
               <NotificationBell isDark={isDark} />
 
-              {/* Cart button — hidden on mobile; BottomNav already has a Cart tab there,
-                  and this row was overflowing off-screen on narrower phones */}
+              {/* Cart / Messages / My Orders / Account — desktop only, shown
+                  directly. On mobile these collapse into the "More" menu below
+                  so the row can never overflow regardless of how many exist. */}
               <div className="relative hidden md:block">
                 <button
                   onClick={() => navigate('/cart')}
@@ -113,8 +146,7 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
                 )}
               </div>
 
-              {/* Messages button */}
-              <div className="relative">
+              <div className="relative hidden md:block">
                 <button
                   onClick={() => navigate('/messages')}
                   className={`flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
@@ -127,9 +159,6 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
                 )}
               </div>
 
-              {/* My Orders — quick access to active transactions + seller QR.
-                  Hidden on mobile (same overflow reason as Cart above) — still
-                  reachable from Profile / the Footer's My Orders link. */}
               <button
                 onClick={() => navigate('/transactions')}
                 className={`hidden md:flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
@@ -145,6 +174,56 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
               >
                 <span className="material-symbols-outlined text-[22px]">person</span>
               </button>
+
+              {/* Mobile-only "More" button — reveals Cart/Messages/Orders/Account in a dropdown */}
+              <div className="relative md:hidden" ref={showMore ? moreBtnRef : null}>
+                <button
+                  onClick={toggleMore}
+                  className={`flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
+                  aria-label="More"
+                >
+                  <span className="material-symbols-outlined text-[22px]">more_horiz</span>
+                  {(cartCount > 0 || unreadMessages > 0) && (
+                    <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white pointer-events-none" />
+                  )}
+                </button>
+              </div>
+
+              {showMore && morePos && createPortal(
+                <div
+                  ref={morePanelRef}
+                  className="fixed bg-white rounded-xl shadow-level-2 border border-gray-100 overflow-hidden z-[100]"
+                  style={{ top: morePos.top, left: morePos.left, width: MORE_MENU_WIDTH, fontFamily: "'Inter', sans-serif" }}
+                >
+                  {[
+                    { icon: 'shopping_cart', label: 'Cart',      path: '/cart',         badge: cartCount > 0 ? (cartCount > 9 ? '9+' : cartCount) : null },
+                    { icon: 'chat_bubble',   label: 'Messages',  path: '/messages',     dot: unreadMessages > 0 },
+                    { icon: 'receipt_long',  label: 'My Orders', path: '/transactions' },
+                    { icon: 'person',        label: 'My Account', path: '/profile' },
+                  ].map(item => (
+                    <button
+                      key={item.path}
+                      onClick={() => { setShowMore(false); navigate(item.path); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-800 hover:bg-gray-50 transition-colors text-left"
+                    >
+                      <span className="material-symbols-outlined text-[20px] text-gray-500 relative">
+                        {item.icon}
+                        {item.dot && (
+                          <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-white" />
+                        )}
+                      </span>
+                      <span className="flex-1">{item.label}</span>
+                      {item.badge && (
+                        <span className="bg-red-500 text-white text-[10px] font-bold rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center leading-none">
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>,
+                document.body,
+              )}
+
               <button
                 onClick={handleSell}
                 className={`${sellBtn} font-label-md text-label-md px-md py-[9px] rounded-full active:scale-[0.97] transition-all shadow-sm whitespace-nowrap`}
