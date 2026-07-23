@@ -128,6 +128,19 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
             <div className="flex items-center gap-xs">
               <NotificationBell isDark={isDark} />
 
+              {/* Scam Awareness — desktop only, shown directly like Cart/Messages;
+                  collapses into the "More" menu on mobile alongside the rest. */}
+              <button
+                onClick={() => navigate('/scam-awareness')}
+                className={`hidden md:flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
+                aria-label="Scam Awareness Center"
+                title="Scam Awareness Center"
+              >
+                <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                  shield
+                </span>
+              </button>
+
               {/* Cart / Messages / My Orders / Account — desktop only, shown
                   directly. On mobile these collapse into the "More" menu below
                   so the row can never overflow regardless of how many exist. */}
@@ -200,6 +213,7 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
                     { icon: 'chat_bubble',   label: 'Messages',  path: '/messages',     dot: unreadMessages > 0 },
                     { icon: 'receipt_long',  label: 'My Orders', path: '/transactions' },
                     { icon: 'person',        label: 'My Account', path: '/profile' },
+                    { icon: 'shield',        label: 'Scam Awareness', path: '/scam-awareness' },
                   ].map(item => (
                     <button
                       key={item.path}

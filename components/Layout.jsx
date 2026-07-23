@@ -23,6 +23,7 @@ const SELF_HEADED = new Set([
   '/search',
   '/help',
   '/messages',
+  '/scam-awareness',
 ]);
 
 function isSelfHeaded(pathname) {
@@ -50,7 +51,6 @@ const ROUTE_TITLES = {
   '/support-chat': 'Chat with Plumio',
   '/terms':        'Terms of Service',
   '/privacy':      'Privacy Policy',
-  '/scam-awareness': 'Scam Awareness Center',
 };
 
 function getTitle(pathname) {
