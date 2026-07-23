@@ -147,10 +147,12 @@ function makeDraggable(button) {
 
 /**
  * ChatWidget — mounts the Chatbase AI bubble only while this component
- * is in the tree (i.e. only for authenticated users).
+ * is in the tree.
  *
- * Usage: drop <ChatWidget /> anywhere inside a route/screen that requires
- * auth, e.g. at the bottom of HomeScreen's JSX return.
+ * Mounted once in Layout.jsx (outside <Outlet />) so it stays alive across
+ * every route instead of unmounting/remounting per screen — that used to
+ * mean the bubble (and its dragged position) only worked on whichever
+ * screen rendered it directly.
  *
  * Renders nothing itself — Chatbase injects its own fixed-position UI
  * directly into <body>. The bubble is made draggable (see makeDraggable

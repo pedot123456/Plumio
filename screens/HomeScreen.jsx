@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import TopAppBar from '../components/TopAppBar';
 import BottomNav from '../components/BottomNav';
 import ProductCard from '../components/ProductCard';
-import ChatWidget from '../components/ChatWidget';
 import Footer from '../components/Footer';
 import ScamAlertBanner from '../components/ScamAlertBanner';
 
@@ -205,7 +204,6 @@ export default function HomeScreen() {
       <Footer />
 
       <BottomNav activeTab="Home" />
-      <ChatWidget />
     </div>
   );
 }

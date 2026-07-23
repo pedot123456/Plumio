@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
+import ChatWidget from './ChatWidget';
 
 // Screens that own their entire UI, including any top navigation.
 // Layout renders <Outlet /> only — no global header injected.
@@ -75,6 +76,10 @@ export default function Layout() {
       )}
 
       <Outlet />
+
+      {/* Mounted once here (not per-screen) so the bubble — and its dragged
+          position — survives navigation instead of resetting on every route. */}
+      <ChatWidget />
 
     </div>
   );
