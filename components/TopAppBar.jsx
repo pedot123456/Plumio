@@ -96,8 +96,9 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
             <div className="flex items-center gap-xs">
               <NotificationBell isDark={isDark} />
 
-              {/* Cart button */}
-              <div className="relative">
+              {/* Cart button — hidden on mobile; BottomNav already has a Cart tab there,
+                  and this row was overflowing off-screen on narrower phones */}
+              <div className="relative hidden md:block">
                 <button
                   onClick={() => navigate('/cart')}
                   className={`flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
@@ -126,10 +127,12 @@ export default function TopAppBar({ variant = 'default', title, trailing }) {
                 )}
               </div>
 
-              {/* My Orders — quick access to active transactions + seller QR */}
+              {/* My Orders — quick access to active transactions + seller QR.
+                  Hidden on mobile (same overflow reason as Cart above) — still
+                  reachable from Profile / the Footer's My Orders link. */}
               <button
                 onClick={() => navigate('/transactions')}
-                className={`flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
+                className={`hidden md:flex items-center justify-center p-2 rounded-full transition-all active:scale-95 ${linkBase}`}
                 aria-label="My Orders"
               >
                 <span className="material-symbols-outlined text-[22px]">receipt_long</span>

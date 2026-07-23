@@ -27,17 +27,19 @@ const SELF_HEADED = new Set([
 function isSelfHeaded(pathname) {
   if (SELF_HEADED.has(pathname)) return true;
   return (
-    pathname.startsWith('/product/')   ||
-    pathname.startsWith('/chat/')      ||
-    pathname.startsWith('/escrow/')    ||
-    pathname.startsWith('/handoff/')   ||
-    pathname.startsWith('/help/')      ||
-    pathname.startsWith('/messages/')
+    pathname.startsWith('/product/')       ||
+    pathname.startsWith('/chat/')          ||
+    pathname.startsWith('/escrow/')        ||
+    pathname.startsWith('/handoff/')       ||
+    pathname.startsWith('/help/')          ||
+    pathname.startsWith('/messages/')      ||
+    pathname.startsWith('/edit-listing/')
   );
 }
 
 const ROUTE_TITLES = {
   '/wallet':       'PlumioPay Wallet',
+  '/claim-earnings': 'Claim Earnings',
   '/coins':        'Plumio Coins',
   '/paylater':     'PlumioPayLater',
   '/likes':        'My Likes',

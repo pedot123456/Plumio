@@ -76,7 +76,9 @@ export default function BrowseCategoriesScreen() {
     const { data } = await supabase
       .from('listings')
       .select('id, title, price, image_url, category')
-      .eq('status', 'active')
+      // Legacy rows created before the status column existed have status=null —
+      // treat those as active too, same as MyListingsScreen does.
+      .or('status.eq.active,status.is.null')
       .order('created_at', { ascending: false })
       .limit(60);
 

@@ -1,7 +1,9 @@
-import React, { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
+
+const isVideoUrl = (url = '') => /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url || '');
 
 const CATEGORIES = [
   { value: 'electronics', label: 'Electronics & Gadgets' },
@@ -30,6 +32,8 @@ const MY_STATES = [
 
 export default function CreateListingScreen() {
   const navigate = useNavigate();
+  const { id: editId } = useParams();
+  const isEditMode = Boolean(editId);
   const { session } = useAuth();
   const fileInputRef = useRef(null);
 
@@ -44,7 +48,9 @@ export default function CreateListingScreen() {
   const [state,    setState]        = useState('');
   const [acceptTrades, setAcceptTrades] = useState(false);
 
-  // Media state — each item: { file: File, preview: string (object URL) }
+  // Media state — each item is either
+  //   { kind: 'existing', url: string }                      — already-uploaded, edit mode only
+  //   { kind: 'new', file: File, preview: string (object URL) } — newly picked file, not yet uploaded
   const [mediaItems, setMediaItems] = useState([]);
   const [mediaError, setMediaError] = useState('');
 
@@ -59,17 +65,67 @@ export default function CreateListingScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError]               = useState(null);
 
+  // Edit mode — load the existing listing and pre-fill the form
+  const [loadingExisting, setLoadingExisting] = useState(isEditMode);
+
+  useEffect(() => {
+    if (!isEditMode) return;
+    // App.js's splash screen already blocks rendering until auth resolves, so by the
+    // time this runs `session` is either a real session or genuinely logged-out.
+    if (!session) { navigate('/login'); return; }
+
+    (async () => {
+      setLoadingExisting(true);
+      const { data, error: fetchError } = await supabase
+        .from('listings')
+        .select('*')
+        .eq('id', editId)
+        .single();
+
+      if (fetchError || !data) {
+        setError(fetchError?.message || 'Listing not found.');
+        setLoadingExisting(false);
+        return;
+      }
+      if (data.user_id !== session.user.id && data.seller_id !== session.user.id) {
+        setError('You can only edit your own listings.');
+        setLoadingExisting(false);
+        return;
+      }
+
+      setTitle(data.title ?? '');
+      setDescription(data.description ?? '');
+      setPrice(data.price != null ? String(data.price) : '');
+      setCategory(data.category ?? '');
+      setCondition(data.condition ?? '');
+      setAllowsHandoff(data.allows_handoff ?? true);
+      setAllowsDelivery(data.allows_delivery ?? true);
+      setState(data.state ?? '');
+      setAcceptTrades(Boolean(data.accepts_trade));
+      setLatitude(data.latitude ?? null);
+      setLongitude(data.longitude ?? null);
+      setLocationLabel(data.location_label ?? '');
+
+      const existingUrls = Array.isArray(data.media_urls) && data.media_urls.length > 0
+        ? data.media_urls
+        : data.image_url ? [data.image_url] : [];
+      setMediaItems(existingUrls.map(url => ({ kind: 'existing', url })));
+
+      setLoadingExisting(false);
+    })();
+  }, [isEditMode, editId, session]);
+
   const handleMediaSelect = (e) => {
     const incoming = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (!incoming.length) return;
 
     setMediaItems(prev => {
-      const combined = [...prev, ...incoming.map(f => ({ file: f, preview: URL.createObjectURL(f) }))];
+      const combined = [...prev, ...incoming.map(f => ({ kind: 'new', file: f, preview: URL.createObjectURL(f) }))];
       if (combined.length > 5) {
         setMediaError('You can only upload a maximum of 5 files.');
         // revoke the ones we can't keep
-        combined.slice(5).forEach(item => URL.revokeObjectURL(item.preview));
+        combined.slice(5).forEach(item => item.kind === 'new' && URL.revokeObjectURL(item.preview));
         return combined.slice(0, 5);
       }
       setMediaError('');
@@ -79,7 +135,8 @@ export default function CreateListingScreen() {
 
   const handleRemoveMedia = (index) => {
     setMediaItems(prev => {
-      URL.revokeObjectURL(prev[index].preview);
+      const item = prev[index];
+      if (item.kind === 'new') URL.revokeObjectURL(item.preview);
       return prev.filter((_, i) => i !== index);
     });
     setMediaError('');
@@ -144,28 +201,30 @@ export default function CreateListingScreen() {
 
     setIsSubmitting(true);
     try {
-      // Upload all media files and collect public URLs
-      const uploadedUrls = [];
+      // Upload only newly-picked files; existing (already-uploaded) items keep their URL as-is.
+      // Final order follows mediaItems' current order, so a reordered/removed cover still works.
+      const media_urls = [];
       for (let i = 0; i < mediaItems.length; i++) {
-        const { file } = mediaItems[i];
-        const ext  = file.name.split('.').pop() || 'bin';
+        const item = mediaItems[i];
+        if (item.kind === 'existing') {
+          media_urls.push(item.url);
+          continue;
+        }
+        const ext  = item.file.name.split('.').pop() || 'bin';
         const path = `${session.user.id}/${Date.now()}_${i}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('listing-images')
-          .upload(path, file, { upsert: false });
+          .upload(path, item.file, { upsert: false });
         if (uploadError) throw uploadError;
         const { data: { publicUrl } } = supabase.storage
           .from('listing-images')
           .getPublicUrl(path);
-        uploadedUrls.push(publicUrl);
+        media_urls.push(publicUrl);
       }
 
-      const image_url  = uploadedUrls[0] ?? null; // first file = cover
-      const media_urls = uploadedUrls;            // all files — used by product gallery
+      const image_url = media_urls[0] ?? null; // first file = cover
 
-      // Insert listing row
-      const { error: insertError } = await supabase.from('listings').insert({
-        user_id:        session.user.id,
+      const listingPayload = {
         title:          title.trim(),
         description:    description.trim() || null,
         price:          Number(price),
@@ -180,10 +239,22 @@ export default function CreateListingScreen() {
         location_label: locationLabel || null,
         state:          state || null,
         accepts_trade:  acceptTrades,
-      });
-      if (insertError) throw insertError;
+      };
 
-      navigate('/my-listings');
+      if (isEditMode) {
+        const { error: updateError } = await supabase
+          .from('listings')
+          .update(listingPayload)
+          .eq('id', editId);
+        if (updateError) throw updateError;
+        navigate(`/product/${editId}`);
+      } else {
+        const { error: insertError } = await supabase
+          .from('listings')
+          .insert({ user_id: session.user.id, ...listingPayload });
+        if (insertError) throw insertError;
+        navigate('/my-listings');
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -201,7 +272,9 @@ export default function CreateListingScreen() {
         >
           <span className="material-symbols-outlined">close</span>
         </button>
-        <h1 className="font-headline-sm text-headline-sm text-primary font-bold tracking-tight">List an Item</h1>
+        <h1 className="font-headline-sm text-headline-sm text-primary font-bold tracking-tight">
+          {isEditMode ? 'Edit Listing' : 'List an Item'}
+        </h1>
         <button
           className="text-primary hover:bg-surface-container-high transition-colors active:scale-95 p-2 rounded-full flex items-center justify-center"
           onClick={() => navigate('/')}
@@ -221,6 +294,13 @@ export default function CreateListingScreen() {
           </div>
         )}
 
+        {loadingExisting ? (
+          <div className="px-margin-mobile flex flex-col items-center justify-center py-xxl gap-sm text-on-surface-variant">
+            <span className="w-8 h-8 border-2 border-outline/30 border-t-secondary rounded-full animate-spin" />
+            <p className="font-body-sm text-body-sm">Loading your listing…</p>
+          </div>
+        ) : (
+        <>
         {/* Photo / Video Upload */}
         <section className="px-margin-mobile mb-lg">
           <input
@@ -255,12 +335,15 @@ export default function CreateListingScreen() {
           {/* Thumbnail grid */}
           {mediaItems.length > 0 && (
             <div className="grid grid-cols-3 gap-4">
-              {mediaItems.map((item, i) => (
+              {mediaItems.map((item, i) => {
+                const src = item.kind === 'new' ? item.preview : item.url;
+                const isVideo = item.kind === 'new' ? item.file.type.startsWith('video/') : isVideoUrl(item.url);
+                return (
                 <div key={i} className="relative h-32 rounded-md overflow-hidden bg-gray-100">
-                  {item.file.type.startsWith('video/') ? (
+                  {isVideo ? (
                     <>
                       <video
-                        src={item.preview}
+                        src={src}
                         muted
                         playsInline
                         preload="metadata"
@@ -278,7 +361,7 @@ export default function CreateListingScreen() {
                     </>
                   ) : (
                     <img
-                      src={item.preview}
+                      src={src}
                       alt={`Media ${i + 1}`}
                       className="w-full h-full object-cover"
                     />
@@ -301,7 +384,8 @@ export default function CreateListingScreen() {
                     <span className="material-symbols-outlined text-[14px]">close</span>
                   </button>
                 </div>
-              ))}
+                );
+              })}
 
               {/* Add more slot — matches grid cell height */}
               {mediaItems.length < 5 && (
@@ -631,9 +715,12 @@ export default function CreateListingScreen() {
             )}
           </div>
         </section>
+        </>
+        )}
       </main>
 
       {/* Sticky Publish Button */}
+      {!loadingExisting && (
       <div className="fixed bottom-0 left-0 w-full bg-surface/95 backdrop-blur-md border-t border-surface-container-highest px-margin-mobile py-margin-mobile z-50">
         <div className="max-w-2xl mx-auto">
           <button
@@ -644,17 +731,18 @@ export default function CreateListingScreen() {
             {isSubmitting ? (
               <>
                 <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
-                Publishing…
+                {isEditMode ? 'Saving…' : 'Publishing…'}
               </>
             ) : (
               <>
-                Publish Listing
+                {isEditMode ? 'Save Changes' : 'Publish Listing'}
                 <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
               </>
             )}
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }

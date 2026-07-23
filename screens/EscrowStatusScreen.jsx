@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import OrderReceivedModal from '../components/OrderReceivedModal';
+import { creditSellerWallet } from '../utils/creditSellerWallet';
 
 const HANDOFF_STEPS = [
   { icon: 'handshake',      text: 'Meet the seller at the agreed location'         },
@@ -173,6 +174,13 @@ export default function EscrowStatusScreen() {
       .from('transactions')
       .update({ status: 'completed' })
       .eq('id', txId);
+    // Best-effort — the transaction completing is the source of truth; the
+    // listing flip to 'sold' just keeps My Listings in sync automatically
+    // instead of relying on the seller to mark it manually.
+    if (!err && tx?.listing?.id) {
+      await supabase.from('listings').update({ status: 'sold' }).eq('id', tx.listing.id);
+    }
+    if (!err) await creditSellerWallet(tx);
     setConfirming(false);
     if (err) { setError(err.message); }
     else { setConfirmed(true); setShowReviewModal(true); }

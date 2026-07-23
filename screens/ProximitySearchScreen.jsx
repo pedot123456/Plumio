@@ -97,6 +97,7 @@ export default function ProximitySearchScreen() {
         let q = supabase
           .from('listings')
           .select('id, title, price, image_url, category, location_label')
+          .or('status.eq.active,status.is.null')
           .order('created_at', { ascending: false })
           .limit(30);
 

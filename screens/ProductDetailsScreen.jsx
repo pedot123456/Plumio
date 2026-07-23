@@ -112,7 +112,7 @@ export default function ProductDetailsScreen() {
     try {
       const { data: listingData, error: listingErr } = await supabase
         .from('listings')
-        .select('id, title, description, price, condition, accepts_trade, created_at, image_url, media_urls, user_id, seller_id')
+        .select('id, title, description, price, condition, accepts_trade, created_at, image_url, media_urls, user_id, seller_id, status, allows_handoff, allows_delivery')
         .eq('id', id)
         .single();
 
@@ -212,6 +212,10 @@ export default function ProductDetailsScreen() {
   }
 
   async function handleAddToCart() {
+    if (listing?.status && listing.status !== 'active') {
+      setError('This item is no longer available — it has already been sold or reserved.');
+      return;
+    }
     if (!session) {
       setGuestMessage('Log in to add items to your cart.');
       setShowGuestModal(true);
@@ -256,6 +260,10 @@ export default function ProductDetailsScreen() {
   }
 
   async function handleBuyNow() {
+    if (listing?.status && listing.status !== 'active') {
+      setError('This item is no longer available — it has already been sold or reserved.');
+      return;
+    }
     if (!session) {
       setGuestMessage('Log in to buy items.');
       setShowGuestModal(true);
@@ -317,6 +325,8 @@ export default function ProductDetailsScreen() {
   }));
 
   const acceptsTrades = listing?.accepts_trade ?? false;
+  // Legacy rows created before the status column existed have status=null — treat as active.
+  const isSold = Boolean(listing?.status) && listing.status !== 'active';
 
   function isVideo(url = '') {
     return Boolean((url || '').match(/\.(mp4|webm|ogg|mov)(\?|$)/i));
@@ -544,6 +554,12 @@ export default function ProductDetailsScreen() {
           <section className="px-margin-mobile md:px-0 py-md md:py-0 md:col-span-5 lg:col-span-4 flex flex-col gap-lg">
             {/* Title / price */}
             <div className="flex flex-col gap-sm">
+              {isSold && (
+                <span className="inline-flex items-center gap-1 w-fit bg-on-surface-variant/10 text-on-surface-variant font-label-sm text-label-sm px-sm py-[3px] rounded-full">
+                  <span className="material-symbols-outlined text-[14px]">block</span>
+                  Sold — No Longer Available
+                </span>
+              )}
               <h1 className="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-primary">
                 {listing.title}
               </h1>
@@ -559,6 +575,23 @@ export default function ProductDetailsScreen() {
                   <span className="inline-flex items-center gap-1 bg-secondary/10 text-secondary border border-secondary/30 px-sm py-[2px] rounded-full font-label-sm text-label-sm">
                     <span className="material-symbols-outlined text-[14px]">swap_horiz</span>
                     Accepts Trades
+                  </span>
+                )}
+              </div>
+
+              {/* Fulfillment methods this seller offers — legacy listings (pre-migration)
+                  have these columns as null, treat that the same as true (both offered) */}
+              <div className="flex items-center flex-wrap gap-sm">
+                {listing.allows_handoff !== false && (
+                  <span className="inline-flex items-center gap-1 bg-primary-container/10 text-primary-container border border-primary-container/30 px-sm py-[2px] rounded-full font-label-sm text-label-sm">
+                    <span className="material-symbols-outlined text-[14px]">handshake</span>
+                    Handoff
+                  </span>
+                )}
+                {listing.allows_delivery !== false && (
+                  <span className="inline-flex items-center gap-1 bg-primary-container/10 text-primary-container border border-primary-container/30 px-sm py-[2px] rounded-full font-label-sm text-label-sm">
+                    <span className="material-symbols-outlined text-[14px]">local_shipping</span>
+                    Delivery
                   </span>
                 )}
               </div>
@@ -655,6 +688,12 @@ export default function ProductDetailsScreen() {
 
               {/* Desktop CTA buttons */}
               <div className="hidden md:flex flex-col gap-sm mt-lg">
+                {isSold ? (
+                  <div className="w-full flex items-center justify-center gap-2 bg-surface-container text-on-surface-variant font-label-md text-label-md py-3 rounded-lg border border-outline-variant">
+                    <span className="material-symbols-outlined text-[20px]">block</span>
+                    No Longer Available
+                  </div>
+                ) : (
                 <div className="flex flex-row items-center gap-4 w-full">
                   {/* Add to Cart — outlined */}
                   <button
@@ -693,6 +732,7 @@ export default function ProductDetailsScreen() {
                     {cartLoading ? 'Adding…' : 'Buy Now'}
                   </button>
                 </div>
+                )}
                 <div className="flex gap-md">
                   <button
                     className="flex-1 bg-secondary text-on-secondary font-label-md text-label-md py-3 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-60"
@@ -809,6 +849,12 @@ export default function ProductDetailsScreen() {
       {/* ── Mobile CTA bar ── */}
       {!isLoading && !error && listing && (
         <div className="md:hidden fixed bottom-[72px] left-0 w-full px-margin-mobile py-sm bg-surface/95 backdrop-blur-md shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] border-t border-outline-variant z-40 flex flex-col gap-sm">
+          {isSold ? (
+            <div className="w-full flex items-center justify-center gap-2 bg-surface-container text-on-surface-variant font-label-md text-label-md py-3 rounded-lg border border-outline-variant">
+              <span className="material-symbols-outlined text-[20px]">block</span>
+              No Longer Available
+            </div>
+          ) : (
           <div className="flex flex-row items-center gap-4 w-full">
             {/* Add to Cart — outlined */}
             <button
@@ -847,6 +893,7 @@ export default function ProductDetailsScreen() {
               {cartLoading ? 'Adding…' : 'Buy Now'}
             </button>
           </div>
+          )}
           <div className="flex gap-sm">
             <button
               className="flex-1 bg-secondary text-on-secondary font-label-md text-label-md py-3 rounded-lg shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60"

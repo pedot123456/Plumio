@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
-import { notify } from '../utils/notify';
+import { creditSellerWallet } from '../utils/creditSellerWallet';
 
 export default function HandoffConfirmScreen() {
   const navigate    = useNavigate();
@@ -48,20 +48,15 @@ export default function HandoffConfirmScreen() {
       .from('transactions')
       .update({ status: 'completed' })
       .eq('id', txId);
+    // Best-effort — keeps My Listings in sync automatically instead of
+    // relying on the seller to mark the item sold manually.
+    if (!err && tx?.listing?.id) {
+      await supabase.from('listings').update({ status: 'sold' }).eq('id', tx.listing.id);
+    }
+    if (!err) await creditSellerWallet(tx);
     setConfirming(false);
     if (err) { setError(err.message); }
-    else {
-      setConfirmed(true);
-      // Notify seller that handoff is complete and funds are released
-      if (tx?.seller_id) {
-        notify(tx.seller_id, {
-          type:  'handoff_complete',
-          title: 'Handoff complete — funds released!',
-          body:  `The buyer confirmed receipt of "${tx.listing?.title ?? 'your item'}". RM ${Number(tx.amount ?? 0).toFixed(2)} is on its way to your balance.`,
-          data:  { tx_id: txId },
-        });
-      }
-    }
+    else { setConfirmed(true); }
   }
 
   // ── Already confirmed ─────────────────────────────────────────

@@ -57,6 +57,9 @@ export default function HomeScreen() {
       const { data, error: err } = await supabase
         .from('listings')
         .select('*')
+        // Legacy rows created before the status column existed have status=null —
+        // treat those as active too, same as MyListingsScreen does.
+        .or('status.eq.active,status.is.null')
         .order('created_at', { ascending: false })
         .range(start, start + PAGE_SIZE - 1);
       if (err) throw err;

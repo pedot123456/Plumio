@@ -6,7 +6,7 @@ import BottomNav from '../components/BottomNav';
 import NotificationBell from '../components/NotificationBell';
 import {
   CreditCard, Truck, Package, Star,
-  Wallet, Coins, Clock,
+  Wallet, Coins, Clock, Banknote,
   Heart, Eye, Store, RotateCcw,
   HelpCircle, MessageCircle, ChevronRight,
   BadgeCheck, LogOut, Edit, Camera,
@@ -122,6 +122,7 @@ export default function UserProfileScreen() {
   const [error,       setError]       = useState(null);
   const [orderCounts, setOrderCounts] = useState({ to_pay: 0, to_ship: 0, to_receive: 0, completed: 0 });
   const [likesCount,  setLikesCount]  = useState(0);
+  const [claimableEarnings, setClaimableEarnings] = useState(0);
 
   // ── Edit modal state ───────────────────────────────────────────
   const [showEditModal,     setShowEditModal]     = useState(false);
@@ -147,7 +148,7 @@ export default function UserProfileScreen() {
     setError(null);
     const uid = session.user.id;
     try {
-      const [profileRes, activeRes, tradesRes, toPayRes, toShipRes, toReceiveRes, toRateRes, likesRes] = await Promise.all([
+      const [profileRes, activeRes, tradesRes, toPayRes, toShipRes, toReceiveRes, toRateRes, likesRes, salesRes] = await Promise.all([
         supabase
           .from('profiles')
           .select('id, full_name, avatar_url, peer_rating, balance, is_verified, created_at, plumio_coins_balance, paylater_limit')
@@ -168,6 +169,9 @@ export default function UserProfileScreen() {
         supabase.from('orders').select('id', { count: 'exact', head: true }).eq('buyer_id', uid).eq('status', 'to_receive'),
         supabase.from('orders').select('id', { count: 'exact', head: true }).eq('buyer_id', uid).eq('status', 'completed'),
         supabase.from('user_activity').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('activity_type', 'like'),
+        // Claimable Earnings must match ClaimEarningsScreen exactly — computed from
+        // real unclaimed completed sales, not the separate profiles.balance field.
+        supabase.from('transactions').select('amount, payout_claimed').eq('seller_id', uid).eq('status', 'completed'),
       ]);
       if (profileRes.error) throw profileRes.error;
       setProfile(profileRes.data ?? {});
@@ -180,6 +184,8 @@ export default function UserProfileScreen() {
         completed:  toRateRes.count    ?? 0,
       });
       setLikesCount(likesRes.count ?? 0);
+      const unclaimed = (salesRes.data ?? []).filter(tx => !tx.payout_claimed);
+      setClaimableEarnings(unclaimed.reduce((s, tx) => s + Number(tx.amount ?? 0), 0));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -428,6 +434,14 @@ export default function UserProfileScreen() {
                     valueColor: 'text-[#A855F7] font-bold',
                     sub: 'Available to spend',
                     path: '/wallet',
+                  },
+                  {
+                    Icon: Banknote,
+                    label: 'Claim Earnings',
+                    value: `RM ${claimableEarnings.toFixed(2)}`,
+                    valueColor: 'text-green-600 font-bold',
+                    sub: 'Cash out to your bank account',
+                    path: '/claim-earnings',
                   },
                   {
                     Icon: Coins,

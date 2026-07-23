@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import BottomNav from '../components/BottomNav';
+
+const MENU_WIDTH = 180;
 
 const TABS = ['Active', 'Sold', 'Drafts'];
 
@@ -37,25 +40,44 @@ function daysAgo(iso) {
 export default function MyListingsScreen() {
   const navigate    = useNavigate();
   const { session } = useAuth();
-  const menuRef     = useRef(null);
+  const menuBtnRef   = useRef(null); // wraps whichever kebab button is currently open
+  const menuPanelRef = useRef(null); // the portaled dropdown panel itself
 
   const [activeTab,     setActiveTab]     = useState('Active');
   const [listings,      setListings]      = useState([]);
   const [isLoading,     setIsLoading]     = useState(true);
   const [error,         setError]         = useState(null);
   const [openMenu,      setOpenMenu]      = useState(null);   // listing id with open kebab
+  const [menuPos,       setMenuPos]       = useState(null);   // {top, left} for the portaled dropdown
   const [boostModal,    setBoostModal]    = useState(null);   // listing to boost
   const [boostDone,     setBoostDone]     = useState(false);
   const [actionLoading, setActionLoading] = useState(null);   // listing id being mutated
 
-  // Close kebab on outside click
+  // Close kebab on outside click — checks both the button and the portaled panel,
+  // since the panel is no longer a DOM descendant of the button's wrapper.
   useEffect(() => {
     const handler = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setOpenMenu(null);
+      if (
+        menuBtnRef.current   && !menuBtnRef.current.contains(e.target) &&
+        menuPanelRef.current && !menuPanelRef.current.contains(e.target)
+      ) {
+        setOpenMenu(null);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  function toggleMenu(e, itemId) {
+    if (openMenu === itemId) { setOpenMenu(null); return; }
+    const rect  = e.currentTarget.getBoundingClientRect();
+    const left  = Math.min(
+      Math.max(8, rect.right - MENU_WIDTH),
+      window.innerWidth - MENU_WIDTH - 8,
+    );
+    setMenuPos({ top: rect.bottom + 4, left });
+    setOpenMenu(itemId);
+  }
 
   useEffect(() => {
     if (!session) { setIsLoading(false); return; }
@@ -286,11 +308,12 @@ export default function MyListingsScreen() {
                           </div>
                         </div>
 
-                        {/* Kebab menu */}
-                        <div className="relative shrink-0" ref={openMenu === item.id ? menuRef : null}>
+                        {/* Kebab menu — dropdown is portaled to <body> (see below) so it can
+                            never be clipped by this card's rounded corners/overflow */}
+                        <div className="relative shrink-0" ref={openMenu === item.id ? menuBtnRef : null}>
                           <button
                             className="text-on-surface-variant hover:bg-surface-container transition-colors p-1 rounded-full"
-                            onClick={() => setOpenMenu(openMenu === item.id ? null : item.id)}
+                            onClick={(e) => toggleMenu(e, item.id)}
                             disabled={loading}
                           >
                             {loading
@@ -298,14 +321,25 @@ export default function MyListingsScreen() {
                               : <span className="material-symbols-outlined text-[20px]">more_vert</span>
                             }
                           </button>
-                          {openMenu === item.id && (
-                            <div className="absolute right-0 top-full mt-1 w-44 bg-surface rounded-xl shadow-level-2 border border-outline-variant/20 overflow-hidden z-50">
+                          {openMenu === item.id && menuPos && createPortal(
+                            <div
+                              ref={menuPanelRef}
+                              className="fixed bg-surface rounded-xl shadow-level-2 border border-outline-variant/20 overflow-hidden z-[100]"
+                              style={{ top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
+                            >
                               <button
                                 className="w-full flex items-center gap-3 px-md py-sm font-body-sm text-body-sm text-on-surface hover:bg-surface-container transition-colors text-left"
                                 onClick={() => { setOpenMenu(null); navigate(`/product/${item.id}`); }}
                               >
                                 <span className="material-symbols-outlined text-[18px] text-on-surface-variant">visibility</span>
                                 View Listing
+                              </button>
+                              <button
+                                className="w-full flex items-center gap-3 px-md py-sm font-body-sm text-body-sm text-on-surface hover:bg-surface-container transition-colors text-left"
+                                onClick={() => { setOpenMenu(null); navigate(`/edit-listing/${item.id}`); }}
+                              >
+                                <span className="material-symbols-outlined text-[18px] text-on-surface-variant">edit</span>
+                                Edit Listing
                               </button>
                               {(isActive || isEscrow) && (
                                 <button
@@ -342,7 +376,8 @@ export default function MyListingsScreen() {
                                 <span className="material-symbols-outlined text-[18px]">delete</span>
                                 Delete Listing
                               </button>
-                            </div>
+                            </div>,
+                            document.body,
                           )}
                         </div>
                       </div>

@@ -22,6 +22,7 @@ import MyListingsScreen      from '../screens/MyListingsScreen';
 import ReportIssueScreen          from '../screens/ReportIssueScreen';
 import OrderConfirmationScreen    from '../screens/OrderConfirmationScreen';
 import WalletScreen          from '../screens/WalletScreen';
+import ClaimEarningsScreen   from '../screens/ClaimEarningsScreen';
 import LikesScreen           from '../screens/LikesScreen';
 import SettingsScreen        from '../screens/SettingsScreen';
 import RecentlyViewedScreen  from '../screens/RecentlyViewedScreen';
@@ -53,6 +54,7 @@ export default function AppNavigator() {
         <Route path="/profile"         element={<UserProfileScreen />} />
         <Route path="/product/:id"     element={<ProductDetailsScreen />} />
         <Route path="/create-listing"  element={<CreateListingScreen />} />
+        <Route path="/edit-listing/:id" element={<CreateListingScreen />} />
         <Route path="/escrow/:txId"            element={<EscrowStatusScreen />} />
         <Route path="/handoff/confirm/:txId"   element={<HandoffConfirmScreen />} />
         <Route path="/handoff/:txId"           element={<SecureHandoffScreen />} />
@@ -74,6 +76,7 @@ export default function AppNavigator() {
 
         {/* Profile sub-screens — global nav header provided by MainLayout */}
         <Route path="/wallet"          element={<WalletScreen />} />
+        <Route path="/claim-earnings"  element={<ClaimEarningsScreen />} />
         <Route path="/coins"           element={<CoinsScreen />} />
         <Route path="/paylater"        element={<PayLaterScreen />} />
         <Route path="/likes"           element={<LikesScreen />} />
